@@ -20,6 +20,10 @@ set(BAMBU_CLI_SOURCES
     main.cpp
     stubs_for_libslic3r.cpp
     nanosvg_impl.cpp
+    io.cpp
+    invariant_guard.cpp
+    json_output.cpp
+    commands/project.cpp
 )
 
 # --- Target ---------------------------------------------------------------
