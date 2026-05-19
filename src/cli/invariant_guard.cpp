@@ -157,6 +157,30 @@ static bool check_config_roundtrip(const std::string& saved_path,
     return true;
 }
 
+GuardResult check_thumbnails_in_archive(const std::string& archive_path,
+                                        const ProjectState& state) {
+    GuardResult gr;
+    mz_zip_archive zip;
+    std::memset(&zip, 0, sizeof(zip));
+    // Use mz_zip_reader_init_file directly (not Slic3r::open_zip_reader which
+    // uses boost::nowide::fopen and may fail on 8.3 shortname paths in TEMP).
+    if (!mz_zip_reader_init_file(&zip, archive_path.c_str(), 0)) {
+        gr.failed_check = "thumbnails";
+        gr.failure_detail = "could not open archive: " + archive_path;
+        return gr;
+    }
+    std::vector<std::string> entries;
+    mz_uint n = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint i = 0; i < n; ++i) {
+        char buf[1024]; mz_zip_reader_get_filename(&zip, i, buf, sizeof(buf));
+        entries.emplace_back(buf);
+    }
+    mz_zip_reader_end(&zip);
+
+    if (check_thumbnails(entries, state, gr)) gr.ok = true;
+    return gr;
+}
+
 GuardResult run_guard(const std::string& saved_path, const ProjectState& state) {
     GuardResult gr;
     mz_zip_archive zip;

@@ -1,4 +1,5 @@
 #include "../io.hpp"
+#include "../invariant_guard.hpp"
 #include "../json_output.hpp"
 #include "../project_state.hpp"
 
@@ -46,11 +47,29 @@ void register_project_subcommands(CLI::App& app, OutputMode* mode_out) {
             std::exit(lr.exit_code);
         }
 
-        // 3. Save (no mutation). save_project runs the guard before rename.
+        // 3. Validate the cloned template's invariants BEFORE saving over it.
+        //    save_project regenerates placeholder thumbnails, so a corrupted
+        //    template (missing plate_N.png / plate_N_small.png) would otherwise
+        //    be silently "fixed" by the save. Running check (b) here against
+        //    the on-disk clone catches input-level corruption explicitly.
+        //    This is scoped to `project init` only — other mutation commands
+        //    (plate add, object add, config set, ...) don't pre-validate inputs.
+        {
+            GuardResult pre = check_thumbnails_in_archive(args->out_path, state);
+            if (!pre.ok) {
+                boost::filesystem::remove(args->out_path);
+                emit_error(mode, "invariant_violation",
+                           "guard check '" + pre.failed_check +
+                           "' failed (template): " + pre.failure_detail);
+                std::exit(8);
+            }
+        }
+
+        // 4. Save (no mutation). save_project runs the post-save guard before rename.
         IoResult sr = save_project(state, args->out_path);
         if (!sr.ok) {
-            // On any save failure (pre-save guard or post-save guard), remove
-            // the clone so the out path is clean (no partial/corrupted output).
+            // On save failure (store_bbs_3mf or post-save guard), remove the
+            // clone so the out path is clean (no partial/corrupted output).
             boost::filesystem::remove(args->out_path);
             emit_error(mode, sr.error_code, sr.error_message);
             std::exit(sr.exit_code);

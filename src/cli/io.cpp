@@ -89,48 +89,6 @@ static void fill_placeholder_thumbnail(Slic3r::ThumbnailData& td) {
 IoResult save_project(const ProjectState& state, const std::string& out_path) {
     IoResult r;
 
-    // 0. Pre-save thumbnail guard: check (b) on the existing out_path (e.g. the
-    //    atomically-copied template) before we overwrite it. A template that is
-    //    missing Metadata/plate_N.png or plate_N_small.png for a referenced plate
-    //    fails here with exit 8 (invariant_violation / thumbnails). We run only
-    //    check (b) — not the full 3-check guard — so that the error always says
-    //    "thumbnails" rather than "rels" when thumbnails are the issue. The full
-    //    guard (all three checks) runs post-save as usual.
-    if (fs::exists(out_path)) {
-        mz_zip_archive pre_zip;
-        std::memset(&pre_zip, 0, sizeof(pre_zip));
-        // Use mz_zip_reader_init_file directly (not Slic3r::open_zip_reader which
-        // uses boost::nowide::fopen and may fail on 8.3 shortname paths in TEMP).
-        if (mz_zip_reader_init_file(&pre_zip, out_path.c_str(), 0)) {
-            std::vector<std::string> pre_entries;
-            mz_uint n = mz_zip_reader_get_num_files(&pre_zip);
-            for (mz_uint i = 0; i < n; ++i) {
-                char buf[1024]; mz_zip_reader_get_filename(&pre_zip, i, buf, sizeof(buf));
-                pre_entries.emplace_back(buf);
-            }
-            mz_zip_reader_end(&pre_zip);
-
-            std::set<std::string> entry_set(pre_entries.begin(), pre_entries.end());
-            for (size_t i = 0; i < state.plate_data.size(); ++i) {
-                const Slic3r::PlateData* pd = state.plate_data[i];
-                if (!pd) continue;
-                int idx = pd->plate_index > 0 ? pd->plate_index : static_cast<int>(i + 1);
-                std::string big   = "Metadata/plate_" + std::to_string(idx) + ".png";
-                std::string small = "Metadata/plate_" + std::to_string(idx) + "_small.png";
-                if (entry_set.find(big) == entry_set.end()) {
-                    r.exit_code = 8; r.error_code = "invariant_violation";
-                    r.error_message = "guard check 'thumbnails' failed (source): missing " + big;
-                    return r;
-                }
-                if (entry_set.find(small) == entry_set.end()) {
-                    r.exit_code = 8; r.error_code = "invariant_violation";
-                    r.error_message = "guard check 'thumbnails' failed (source): missing " + small;
-                    return r;
-                }
-            }
-        }
-    }
-
     // 1. Atomic temp path
     const std::string tmp_path = out_path + ".tmp.3mf";
     fs::remove(tmp_path);   // clean any stale leftover

@@ -25,4 +25,12 @@ struct GuardResult {
 // Returns ok=true if all three pass.
 GuardResult run_guard(const std::string& saved_path, const ProjectState& state);
 
+// Standalone check (b) only — runs against an arbitrary archive path with the
+// expected plate set inferred from <state>. Used by `project init` to validate
+// the cloned template BEFORE save_project regenerates thumbnails (which would
+// otherwise mask input corruption). Opens the archive via mz_zip_reader_init_file
+// directly to tolerate Windows 8.3-shortname paths (e.g. C:\Users\ILDARC~1\...).
+GuardResult check_thumbnails_in_archive(const std::string& archive_path,
+                                        const ProjectState& state);
+
 } // namespace bambu_cli
