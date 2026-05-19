@@ -23,8 +23,10 @@ set(BAMBU_CLI_SOURCES
     io.cpp
     invariant_guard.cpp
     json_output.cpp
+    project_ops.cpp
     commands/project.cpp
     commands/inspect.cpp
+    commands/plate.cpp
 )
 
 # --- Target ---------------------------------------------------------------
