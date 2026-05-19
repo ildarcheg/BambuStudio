@@ -5,6 +5,7 @@ set(BAMBU_CLI_TEST_SOURCES
     cli_tests_main.cpp
     test_helpers.cpp
     test_project_init.cpp
+    test_inspect.cpp
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}

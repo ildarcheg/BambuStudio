@@ -24,6 +24,7 @@ set(BAMBU_CLI_SOURCES
     invariant_guard.cpp
     json_output.cpp
     commands/project.cpp
+    commands/inspect.cpp
 )
 
 # --- Target ---------------------------------------------------------------
