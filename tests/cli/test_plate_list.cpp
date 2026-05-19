@@ -21,8 +21,10 @@ TEST_CASE("plate list: after add, lists both plates", "[m3][plate_list]") {
 
     auto r = spawn_cli({"--json", "plate", "list", out});
     REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stdout_text.find("\"plate_count\":2") != std::string::npos
-         || r.stdout_text.find("second") != std::string::npos);
+    // Either plate_count=2 or "second" must appear in JSON output.
+    bool has_count = r.stdout_text.find("\"plate_count\":2") != std::string::npos;
+    bool has_name  = r.stdout_text.find("second")           != std::string::npos;
+    REQUIRE((has_count || has_name));
 
     fs::remove(out);
 }
