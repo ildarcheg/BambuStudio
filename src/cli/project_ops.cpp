@@ -472,6 +472,133 @@ std::vector<ListedObject> list_objects(const ProjectState& state, const std::str
     return out;
 }
 
+// ---- M9: object remove + object set-filament ------------------------------
+
+OpResult remove_object(ProjectState& state, const std::string& object_name) {
+    OpResult r;
+
+    // Collect ALL indices whose name matches (group-by-name semantics from M6
+    // N-objects-per-copy model).  Store in ascending order.
+    std::vector<int> to_remove;
+    for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+        const auto* obj = state.model.objects[i];
+        if (obj && obj->name == object_name)
+            to_remove.push_back(i);
+    }
+    if (to_remove.empty()) {
+        r.exit_code = 6; r.error_code = "unknown_reference";
+        r.error_message = "object '" + object_name + "' not found";
+        return r;
+    }
+
+    // Build a lookup set for O(1) membership test.
+    std::vector<bool> is_removed(state.model.objects.size(), false);
+    for (int idx : to_remove) is_removed[static_cast<size_t>(idx)] = true;
+
+    // Step 1: detach all instances belonging to the removed objects from every plate.
+    for (auto* pd : state.plate_data) {
+        if (!pd) continue;
+        // objects_and_instances: remove entries whose .first is a removed index.
+        auto& oi = pd->objects_and_instances;
+        oi.erase(std::remove_if(oi.begin(), oi.end(),
+            [&](const std::pair<int,int>& p) {
+                int fi = p.first;
+                return fi >= 0 && fi < static_cast<int>(is_removed.size()) && is_removed[static_cast<size_t>(fi)];
+            }), oi.end());
+        // obj_inst_map: remove entries whose value.first is a removed index.
+        for (auto it = pd->obj_inst_map.begin(); it != pd->obj_inst_map.end(); ) {
+            int fi = it->second.first;
+            if (fi >= 0 && fi < static_cast<int>(is_removed.size()) && is_removed[static_cast<size_t>(fi)])
+                it = pd->obj_inst_map.erase(it);
+            else
+                ++it;
+        }
+    }
+
+    // Step 2: delete ModelObjects in DESCENDING index order so earlier indices
+    // remain valid as we delete (each delete shifts higher-indexed objects down).
+    for (int i = static_cast<int>(to_remove.size()) - 1; i >= 0; --i) {
+        state.model.delete_object(static_cast<size_t>(to_remove[static_cast<size_t>(i)]));
+    }
+
+    // Step 3: renumber remaining object-index references in all plates.
+    // For each remaining index ref R in a plate, count how many of the removed
+    // indices were BELOW R — that is the amount by which R must be decremented.
+    for (auto* pd : state.plate_data) {
+        if (!pd) continue;
+        auto adjust = [&](int old_idx) -> int {
+            // Count how many removed indices are strictly less than old_idx.
+            int decrement = 0;
+            for (int rm : to_remove) {
+                if (rm < old_idx) ++decrement;
+            }
+            return old_idx - decrement;
+        };
+        for (auto& p : pd->objects_and_instances)
+            p.first = adjust(p.first);
+        for (auto& kv : pd->obj_inst_map)
+            kv.second.first = adjust(kv.second.first);
+    }
+
+    r.ok = true;
+    return r;
+}
+
+OpResult set_object_filament(ProjectState& state,
+                             const std::string& object_name,
+                             int filament_idx) {
+    OpResult r;
+
+    // Collect ALL matching indices (group-by-name semantics).
+    std::vector<int> matches;
+    for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+        const auto* obj = state.model.objects[i];
+        if (obj && obj->name == object_name)
+            matches.push_back(i);
+    }
+    if (matches.empty()) {
+        r.exit_code = 6; r.error_code = "unknown_reference";
+        r.error_message = "object '" + object_name + "' not found";
+        return r;
+    }
+
+    // Validate filament index BEFORE any mutation (nothing to roll back if we fail here).
+    const Slic3r::ConfigOption* slots_opt =
+        state.project_config.option("filament_settings_id");
+    size_t slot_count = 0;
+    if (auto* vs = dynamic_cast<const Slic3r::ConfigOptionStrings*>(slots_opt))
+        slot_count = vs->values.size();
+    if (filament_idx < 1 || filament_idx > static_cast<int>(slot_count)) {
+        r.exit_code = 1; r.error_code = "usage_error";
+        r.error_message = "filament " + std::to_string(filament_idx) +
+                          " out of range [1," + std::to_string(slot_count) + "]";
+        return r;
+    }
+
+    // Apply to every matching ModelObject.
+    for (int idx : matches) {
+        auto* obj = state.model.objects[idx];
+        if (!obj) continue;
+
+        // Bug B retrofit guard: if any volume's source.input_file is empty,
+        // populate it from obj->input_file BEFORE setting the extruder key.
+        // This prevents the Bug B failure mode (extruder set + missing source_file
+        // → BambuStudio silently drops the object on load).
+        for (auto* vol : obj->volumes) {
+            if (vol && vol->source.input_file.empty()) {
+                vol->source.input_file = obj->input_file;
+                vol->source.object_idx = 0;
+                vol->source.volume_idx = 0;
+            }
+        }
+
+        obj->config.set("extruder", filament_idx);
+    }
+
+    r.ok = true;
+    return r;
+}
+
 // ---- M7: config set / unset / list ----------------------------------------
 
 // Helper: get filament_count from project_config.

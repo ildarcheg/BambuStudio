@@ -90,6 +90,28 @@ struct ListedObject { std::string plate_name; std::string object_name; int extru
 std::vector<ListedObject> list_objects(const ProjectState& state,
                                        const std::string& only_plate = {});
 
+// ---- M9: object remove + object set-filament ------------------------------
+
+// Remove ALL ModelObjects whose name == <object_name> from the project.
+// Detaches them from all plates (obj_inst_map + objects_and_instances), then
+// deletes them from the model and renumbers remaining object-index references.
+// Group-by-name semantics: if N ModelObjects share the same name (e.g., from
+// `object add --count N`), all N are removed in one call.
+// Error codes:
+//   exit 6 (unknown_reference) — no matching object found
+OpResult remove_object(ProjectState& state, const std::string& object_name);
+
+// Stamp extruder=N on ALL ModelObjects whose name == <object_name>.
+// Group-by-name semantics (same N-object logic as remove_object above).
+// Also applies the Bug B retrofit guard: if any volume's source.input_file is
+// empty, it is populated from obj->input_file before setting the extruder key.
+// Error codes:
+//   exit 6 (unknown_reference) — no matching object found
+//   exit 1 (usage_error)       — filament_idx out of range [1, slot_count]
+OpResult set_object_filament(ProjectState& state,
+                             const std::string& object_name,
+                             int filament_idx);
+
 // ---- M7: config set / unset / list ----------------------------------------
 
 // Find the model.objects index of the FIRST ModelObject whose name == <name>.

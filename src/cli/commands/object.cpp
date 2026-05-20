@@ -139,6 +139,50 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
             emit_ok(mode, "ok", m.str());
         }
     });
+
+    // --- object remove ------------------------------------------------
+    // Removes ALL ModelObjects whose name matches (group-by-name semantics).
+    struct ORmArgs { std::string in, name, out; };
+    auto* orm = object->add_subcommand("remove", "remove all objects with the given name");
+    auto ora = std::make_shared<ORmArgs>();
+    orm->add_option("in",       ora->in,   "input .3mf")->required();
+    orm->add_option("--name",   ora->name, "object name (all copies removed)")->required();
+    orm->add_option("--output", ora->out,  "output .3mf (defaults to in-place)");
+    orm->callback([ora, mode_out]() {
+        OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
+        ProjectState state;
+        IoResult lr = load_project(ora->in, state);
+        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
+        OpResult op = remove_object(state, ora->name);
+        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        const std::string& out = ora->out.empty() ? ora->in : ora->out;
+        IoResult sr = save_project(state, out);
+        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
+        emit_ok(mode, "ok", "object removed: " + ora->name);
+    });
+
+    // --- object set-filament ------------------------------------------
+    // Stamps extruder=N on ALL ModelObjects with the given name (group-by-name).
+    // Applies Bug B retrofit guard before setting the extruder key.
+    struct SFArgs { std::string in, name, out; int filament = 0; };
+    auto* sf = object->add_subcommand("set-filament", "retrofit filament slot on all objects with the given name");
+    auto sa = std::make_shared<SFArgs>();
+    sf->add_option("in",         sa->in,       "input .3mf")->required();
+    sf->add_option("--name",     sa->name,     "object name (all copies updated)")->required();
+    sf->add_option("--filament", sa->filament, "1-based filament slot")->required();
+    sf->add_option("--output",   sa->out,      "output .3mf (defaults to in-place)");
+    sf->callback([sa, mode_out]() {
+        OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
+        ProjectState state;
+        IoResult lr = load_project(sa->in, state);
+        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
+        OpResult op = set_object_filament(state, sa->name, sa->filament);
+        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        const std::string& out = sa->out.empty() ? sa->in : sa->out;
+        IoResult sr = save_project(state, out);
+        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
+        emit_ok(mode, "ok", "set-filament: " + sa->name + " -> " + std::to_string(sa->filament));
+    });
 }
 
 } // namespace bambu_cli
