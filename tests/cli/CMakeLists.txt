@@ -8,6 +8,7 @@ set(BAMBU_CLI_TEST_SOURCES
     test_inspect.cpp
     test_plate_add.cpp
     test_plate_list.cpp
+    test_object_add.cpp
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
