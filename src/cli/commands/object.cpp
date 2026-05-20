@@ -15,7 +15,7 @@ struct ObjectAddArgs {
     std::string stl;
     std::string name;
     std::string out_path;
-    int         filament = 0;   // 0 = unset; 1..N = 1-based extruder slot
+    int         filament = -1;  // -1 = not specified; 1..N = 1-based extruder slot
 };
 
 struct ObjectListArgs {

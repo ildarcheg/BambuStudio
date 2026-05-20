@@ -149,9 +149,11 @@ OpResult add_object_to_plate(ProjectState& state,
         inst->set_offset(offset);
     }
 
-    // 7. Filament validation + assignment (1-based; 0 means unset).
-    //    Validate AFTER attach (so we can roll back cleanly).
-    if (filament_idx != 0) {
+    // 7. Filament validation + assignment.
+    //    -1 means "not specified" (skip). Any other value is validated as
+    //    1-based extruder slot against filament_settings_id slot count.
+    //    Validate AFTER attach (so we can roll back cleanly via delete_object).
+    if (filament_idx != -1) {
         const Slic3r::ConfigOption* slots_opt =
             state.project_config.option("filament_settings_id");
         size_t slot_count = 0;
