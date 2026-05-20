@@ -15,7 +15,7 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out);
 }
 
 int main(int argc, char** argv) {
-    CLI::App app{"bambu-cli — compose .3mf project files for Bambu Studio"};
+    CLI::App app{"bambu-cli -- compose .3mf project files for Bambu Studio"};
     app.set_version_flag("--version", "bambu-cli 0.1.0");
 
     bambu_cli::OutputMode mode = bambu_cli::OutputMode::Text;
