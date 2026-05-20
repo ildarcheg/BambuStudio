@@ -11,6 +11,7 @@
 #include <memory>
 #include <sstream>
 #include <boost/filesystem.hpp>
+#include <boost/algorithm/string/join.hpp>
 
 namespace bambu_cli {
 
@@ -416,6 +417,83 @@ std::vector<ListedObject> list_objects(const ProjectState& state, const std::str
 
 // ---- M7: config set / unset / list ----------------------------------------
 
+// Helper: get filament_count from project_config.
+// filament_count = length of filament_settings_id values.
+// Falls back to 1 if the option is absent or empty.
+static size_t get_filament_count(const Slic3r::DynamicPrintConfig& cfg) {
+    const Slic3r::ConfigOption* opt = cfg.option("filament_settings_id");
+    if (auto* vs = dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt))
+        if (!vs->values.empty())
+            return vs->values.size();
+    return 1;
+}
+
+// Add <key> to position 0 of different_settings_to_system (process-tab slot).
+// The array is sized to filament_count + 2:
+//   position 0             — process-tab modified keys (comma-free, semicolon-separated)
+//   positions 1..fc        — per-filament modified keys (one per filament slot)
+//   position fc+1          — printer-tab modified keys
+//
+// NOTE: Filament-tab and printer-tab routing is a follow-up task; this hotfix
+// always writes to position 0 (process tab), which covers the vast majority of
+// project-level settings (line_width, layer_height, infill_density, etc.).
+//
+// Within each slot the keys are stored as a flat semicolon-separated string
+// (no quoting, no escape needed — config key names contain only [a-z_] chars).
+static void add_to_different_settings_to_system(Slic3r::DynamicPrintConfig& cfg,
+                                                const std::string& key) {
+    size_t fc = get_filament_count(cfg);
+    size_t target_size = fc + 2;
+
+    // Get-or-create the option.
+    auto* opt = cfg.option<Slic3r::ConfigOptionStrings>("different_settings_to_system",
+                                                         /*create_if_missing=*/true);
+    if (!opt) return;   // should never happen
+
+    // Resize, filling new slots with empty strings. Don't truncate non-empty entries.
+    if (opt->values.size() < target_size)
+        opt->values.resize(target_size, std::string());
+
+    // Position 0 is the process-tab slot. Parse into individual key names.
+    const std::string& slot0 = opt->values[0];
+    std::vector<std::string> keys;
+    if (!slot0.empty()) {
+        // Keys are plain identifiers separated by ';'. unescape_strings_cstyle
+        // handles the standard Slic3r ';'-delimited format.
+        Slic3r::unescape_strings_cstyle(slot0, keys);
+    }
+
+    // Deduplicate: only add if not already present.
+    if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
+        keys.push_back(key);
+        // Re-serialize as ';'-separated string (no quoting needed for key names).
+        opt->values[0] = boost::algorithm::join(keys, ";");
+    }
+}
+
+// Remove <key> from position 0 of different_settings_to_system (process-tab slot).
+// If position 0 becomes empty after removal, leave the option present with the
+// empty string at position 0 — BS may rely on the option's presence to detect
+// that the project was saved with preset awareness.
+static void remove_from_different_settings_to_system(Slic3r::DynamicPrintConfig& cfg,
+                                                     const std::string& key) {
+    auto* opt = cfg.option<Slic3r::ConfigOptionStrings>("different_settings_to_system",
+                                                         /*create_if_missing=*/false);
+    if (!opt || opt->values.empty()) return;
+
+    // Parse position 0.
+    std::vector<std::string> keys;
+    if (!opt->values[0].empty())
+        Slic3r::unescape_strings_cstyle(opt->values[0], keys);
+
+    auto it = std::find(keys.begin(), keys.end(), key);
+    if (it == keys.end()) return;   // key not present — nothing to do
+
+    keys.erase(it);
+    // Re-serialize (empty → empty string, which is fine).
+    opt->values[0] = boost::algorithm::join(keys, ";");
+}
+
 int find_object_by_name(const ProjectState& state, const std::string& name) {
     for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
         const auto* obj = state.model.objects[i];
@@ -440,6 +518,15 @@ OpResult config_set(ProjectState& state,
         return r;
     }
 
+    // different_settings_to_system is a system-managed key that tracks which
+    // keys were user-modified. It must not be set directly by the user.
+    if (key == "different_settings_to_system") {
+        r.exit_code    = 4;
+        r.error_code   = "bad_config";
+        r.error_message = "'different_settings_to_system' is a system-managed key and cannot be set directly";
+        return r;
+    }
+
     Slic3r::ConfigSubstitutionContext subst_ctx{
         Slic3r::ForwardCompatibilitySubstitutionRule::Disable };
 
@@ -453,6 +540,11 @@ OpResult config_set(ProjectState& state,
             r.error_message = "invalid value for '" + key + "': " + ex.what();
             return r;
         }
+        // Register this key in different_settings_to_system (position 0, process tab)
+        // so that BambuStudio recognizes it as a user override and honors it when
+        // slicing. Per-object overrides go through model_settings.config and do NOT
+        // need this tracking. Filament-tab and printer-tab routing is a follow-up.
+        add_to_different_settings_to_system(state.project_config, key);
     } else {
         int idx = find_object_by_name(state, object_name);
         if (idx < 0) {
@@ -498,6 +590,9 @@ OpResult config_unset(ProjectState& state,
             return r;
         }
         state.project_config.erase(key);
+        // Remove from different_settings_to_system tracking so BS no longer
+        // treats this key as a user override.
+        remove_from_different_settings_to_system(state.project_config, key);
     } else {
         int idx = find_object_by_name(state, object_name);
         if (idx < 0) {
