@@ -19,6 +19,17 @@ struct OpResult {
 // plate names — otherwise exit 5 (duplicate_name).
 OpResult add_plate(ProjectState& state, const std::string& name);
 
+// Remove an existing plate from <state>. The plate must exist (else exit 6).
+// If the plate contains any objects/instances, removal is refused (exit 6).
+OpResult remove_plate(ProjectState& state, const std::string& name);
+
+// Rename an existing plate from <from> to <to>. <to> must be non-empty (else
+// exit 1). <to> must not already be in use (else exit 5). <from> must exist
+// (else exit 6).
+OpResult rename_plate(ProjectState& state,
+                      const std::string& from,
+                      const std::string& to);
+
 // Get all plate names in order.
 std::vector<std::string> list_plate_names(const ProjectState& state);
 

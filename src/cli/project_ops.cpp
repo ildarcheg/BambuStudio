@@ -60,6 +60,55 @@ static int find_plate_by_name(const ProjectState& state, const std::string& name
     return -1;
 }
 
+OpResult remove_plate(ProjectState& state, const std::string& name) {
+    OpResult r;
+    int idx = find_plate_by_name(state, name);
+    if (idx < 0) {
+        r.exit_code = 6; r.error_code = "unknown_reference";
+        r.error_message = "plate '" + name + "' not found";
+        return r;
+    }
+    Slic3r::PlateData* pd = state.plate_data[static_cast<size_t>(idx)];
+    if (!pd->objects_and_instances.empty()) {
+        r.exit_code = 6; r.error_code = "unknown_reference";
+        r.error_message = "plate '" + name + "' is not empty (" +
+                          std::to_string(pd->objects_and_instances.size()) +
+                          " instance(s)); remove objects first";
+        return r;
+    }
+    delete pd;
+    state.plate_data.erase(state.plate_data.begin() + idx);
+    r.ok = true;
+    return r;
+}
+
+OpResult rename_plate(ProjectState& state,
+                      const std::string& from,
+                      const std::string& to) {
+    OpResult r;
+    if (to.empty()) {
+        r.exit_code = 1; r.error_code = "usage_error";
+        r.error_message = "new plate name must be non-empty";
+        return r;
+    }
+    for (const auto* p : state.plate_data) {
+        if (p && p->plate_name == to) {
+            r.exit_code = 5; r.error_code = "duplicate_name";
+            r.error_message = "plate '" + to + "' already exists";
+            return r;
+        }
+    }
+    int idx = find_plate_by_name(state, from);
+    if (idx < 0) {
+        r.exit_code = 6; r.error_code = "unknown_reference";
+        r.error_message = "plate '" + from + "' not found";
+        return r;
+    }
+    state.plate_data[static_cast<size_t>(idx)]->plate_name = to;
+    r.ok = true;
+    return r;
+}
+
 static std::string derive_object_name(const std::string& stl_path) {
     boost::filesystem::path p(stl_path);
     return p.stem().string();
