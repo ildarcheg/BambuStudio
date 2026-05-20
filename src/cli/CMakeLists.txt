@@ -28,6 +28,7 @@ set(BAMBU_CLI_SOURCES
     commands/inspect.cpp
     commands/plate.cpp
     commands/object.cpp
+    commands/config.cpp
 )
 
 # --- Target ---------------------------------------------------------------

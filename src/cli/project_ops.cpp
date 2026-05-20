@@ -5,8 +5,10 @@
 #include "libslic3r/Model.hpp"
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Config.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <sstream>
 #include <boost/filesystem.hpp>
 
@@ -409,6 +411,169 @@ std::vector<ListedObject> list_objects(const ProjectState& state, const std::str
             out.push_back(std::move(lo));
         }
     }
+    return out;
+}
+
+// ---- M7: config set / unset / list ----------------------------------------
+
+int find_object_by_name(const ProjectState& state, const std::string& name) {
+    for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+        const auto* obj = state.model.objects[i];
+        if (obj && obj->name == name)
+            return i;
+    }
+    return -1;
+}
+
+
+OpResult config_set(ProjectState& state,
+                    const std::string& object_name,
+                    const std::string& key,
+                    const std::string& value) {
+    OpResult r;
+
+    // Validate the key against print_config_def.
+    if (!Slic3r::print_config_def.has(key)) {
+        r.exit_code    = 4;
+        r.error_code   = "bad_config";
+        r.error_message = "unknown config key: '" + key + "'";
+        return r;
+    }
+
+    Slic3r::ConfigSubstitutionContext subst_ctx{
+        Slic3r::ForwardCompatibilitySubstitutionRule::Disable };
+
+    if (object_name.empty()) {
+        // Project-level: target is state.project_config (DynamicPrintConfig directly).
+        try {
+            state.project_config.set_deserialize(key, value, subst_ctx);
+        } catch (const std::exception& ex) {
+            r.exit_code    = 4;
+            r.error_code   = "bad_config";
+            r.error_message = "invalid value for '" + key + "': " + ex.what();
+            return r;
+        }
+    } else {
+        int idx = find_object_by_name(state, object_name);
+        if (idx < 0) {
+            r.exit_code    = 6;
+            r.error_code   = "unknown_reference";
+            r.error_message = "object '" + object_name + "' not found";
+            return r;
+        }
+        // ModelObject::config is ModelConfigObject which inherits ModelConfig.
+        // ModelConfig::set_deserialize delegates to m_data.set_deserialize + touch().
+        try {
+            state.model.objects[idx]->config.set_deserialize(key, value, subst_ctx);
+        } catch (const std::exception& ex) {
+            r.exit_code    = 4;
+            r.error_code   = "bad_config";
+            r.error_message = "invalid value for '" + key + "': " + ex.what();
+            return r;
+        }
+    }
+
+    r.ok = true;
+    return r;
+}
+
+OpResult config_unset(ProjectState& state,
+                      const std::string& object_name,
+                      const std::string& key) {
+    OpResult r;
+
+    // Validate the key against print_config_def.
+    if (!Slic3r::print_config_def.has(key)) {
+        r.exit_code    = 4;
+        r.error_code   = "bad_config";
+        r.error_message = "unknown config key: '" + key + "'";
+        return r;
+    }
+
+    if (object_name.empty()) {
+        if (!state.project_config.has(key)) {
+            r.exit_code    = 6;
+            r.error_code   = "unknown_reference";
+            r.error_message = "key '" + key + "' not set on target";
+            return r;
+        }
+        state.project_config.erase(key);
+    } else {
+        int idx = find_object_by_name(state, object_name);
+        if (idx < 0) {
+            r.exit_code    = 6;
+            r.error_code   = "unknown_reference";
+            r.error_message = "object '" + object_name + "' not found";
+            return r;
+        }
+        if (!state.model.objects[idx]->config.has(key)) {
+            r.exit_code    = 6;
+            r.error_code   = "unknown_reference";
+            r.error_message = "key '" + key + "' not set on target";
+            return r;
+        }
+        state.model.objects[idx]->config.erase(key);
+    }
+
+    r.ok = true;
+    return r;
+}
+
+std::vector<ConfigEntry> config_list(const ProjectState& state,
+                                     const std::string& object_name,
+                                     bool only_changed) {
+    std::vector<ConfigEntry> out;
+
+    // Get a const reference to the underlying DynamicPrintConfig.
+    const Slic3r::DynamicPrintConfig* cfg_ptr = nullptr;
+    // For per-object we need the ModelConfig's underlying data via get().
+    const Slic3r::ModelConfig* model_cfg_ptr = nullptr;
+
+    if (object_name.empty()) {
+        cfg_ptr = &state.project_config;
+    } else {
+        // Cast away to find object — state is const here so use const_cast trick.
+        // Actually state is passed as const& so we use const_cast for model.
+        for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+            const auto* obj = state.model.objects[i];
+            if (obj && obj->name == object_name) {
+                model_cfg_ptr = &obj->config;
+                cfg_ptr       = &obj->config.get();
+                break;
+            }
+        }
+        if (!cfg_ptr) return out;  // object not found — return empty
+    }
+
+    std::vector<std::string> keys_to_emit;
+
+    if (only_changed) {
+        // Build a defaults config for the same set of keys, then diff.
+        // new_from_defaults_keys is a static method on DynamicPrintConfig.
+        // It returns a heap-allocated DynamicPrintConfig* that we must delete.
+        std::vector<std::string> all_keys = cfg_ptr->keys();
+        if (!all_keys.empty()) {
+            std::unique_ptr<Slic3r::DynamicPrintConfig> defaults(
+                Slic3r::DynamicPrintConfig::new_from_defaults_keys(all_keys));
+            if (defaults) {
+                // diff() returns keys whose value in *cfg_ptr differs from *defaults.
+                keys_to_emit = cfg_ptr->diff(*defaults);
+            } else {
+                // Fallback: emit all keys if defaults couldn't be built.
+                keys_to_emit = all_keys;
+            }
+        }
+    } else {
+        keys_to_emit = cfg_ptr->keys();
+    }
+
+    for (const auto& k : keys_to_emit) {
+        ConfigEntry e;
+        e.key   = k;
+        e.value = cfg_ptr->opt_serialize(k);
+        out.push_back(std::move(e));
+    }
+
     return out;
 }
 

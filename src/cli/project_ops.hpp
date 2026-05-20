@@ -79,4 +79,49 @@ struct ListedObject { std::string plate_name; std::string object_name; int extru
 std::vector<ListedObject> list_objects(const ProjectState& state,
                                        const std::string& only_plate = {});
 
+// ---- M7: config set / unset / list ----------------------------------------
+
+// Find the model.objects index of the FIRST ModelObject whose name == <name>.
+// Returns -1 if not found.
+// NOTE: with M6 hotfix's N-objects-per-copy model, multiple ModelObjects can share
+// the same name when --count > 1. M7 applies config operations to the FIRST match
+// only. M9 will revisit name disambiguation more thoroughly.
+int find_object_by_name(const ProjectState& state, const std::string& name);
+
+// A single key-value config entry (used by config_list).
+struct ConfigEntry {
+    std::string key;
+    std::string value;
+};
+
+// Set a config key on the project-level config (empty object_name) or on the
+// per-object config of the first matching ModelObject.
+// Error codes:
+//   exit 4 (bad_config)        — unknown key or set_deserialize parse failure
+//   exit 6 (unknown_reference) — object_name not found
+OpResult config_set(ProjectState& state,
+                    const std::string& object_name,
+                    const std::string& key,
+                    const std::string& value);
+
+// Remove a config key from the project-level config or per-object config.
+// Error codes:
+//   exit 4 (bad_config)        — unknown key in print_config_def
+//   exit 6 (unknown_reference) — object_name not found, OR key not set on target
+OpResult config_unset(ProjectState& state,
+                      const std::string& object_name,
+                      const std::string& key);
+
+// List config entries. If only_changed is true, only keys whose value differs
+// from libslic3r defaults are returned. Otherwise, all keys currently set on
+// the target are returned.
+// Error codes (in OpResult, but config_list returns the list directly):
+//   If object_name is provided and not found, returns empty vector
+//   (caller should use find_object_by_name first to distinguish not-found).
+// NOTE: for project_config against libslic3r defaults, many keys may differ
+//   because the printer preset sets them — that's expected.
+std::vector<ConfigEntry> config_list(const ProjectState& state,
+                                     const std::string& object_name,
+                                     bool only_changed);
+
 } // namespace bambu_cli

@@ -11,6 +11,7 @@ void register_project_subcommands(CLI::App& app, OutputMode* mode_out);
 void register_inspect_subcommands(CLI::App& app, OutputMode* mode_out);
 void register_plate_subcommands(CLI::App& app, OutputMode* mode_out);
 void register_object_subcommands(CLI::App& app, OutputMode* mode_out);
+void register_config_subcommands(CLI::App& app, OutputMode* mode_out);
 }
 
 int main(int argc, char** argv) {
@@ -30,6 +31,7 @@ int main(int argc, char** argv) {
     bambu_cli::register_inspect_subcommands(app, &mode);
     bambu_cli::register_plate_subcommands(app, &mode);
     bambu_cli::register_object_subcommands(app, &mode);
+    bambu_cli::register_config_subcommands(app, &mode);
 
     CLI11_PARSE(app, argc, argv);
 
