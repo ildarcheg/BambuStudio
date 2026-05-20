@@ -15,6 +15,7 @@ struct ObjectAddArgs {
     std::string stl;
     std::string name;
     std::string out_path;
+    int         filament = 0;   // 0 = unset; 1..N = 1-based extruder slot
 };
 
 struct ObjectListArgs {
@@ -33,6 +34,7 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     add->add_option("--stl",     a->stl,      "STL file to add")->required();
     add->add_option("--name",    a->name,     "explicit object name (default: stem of --stl)");
     add->add_option("--output",  a->out_path, "output .3mf (defaults to in-place)");
+    add->add_option("--filament", a->filament, "1-based extruder/filament slot");
     add->callback([a, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
         ProjectState state;
@@ -40,7 +42,7 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
         ObjectRef ref;
-        OpResult op = add_object_to_plate(state, a->plate, a->stl, a->name, &ref);
+        OpResult op = add_object_to_plate(state, a->plate, a->stl, a->name, a->filament, &ref);
         if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
 
         const std::string& out = a->out_path.empty() ? a->in_path : a->out_path;
