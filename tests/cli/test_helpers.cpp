@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <regex>
 #include <sstream>
 
 namespace bp = boost::process;
@@ -83,6 +84,55 @@ std::string local_stl_dir_or_skip() {
     fs::path p = BAMBU_CLI_LOCAL_STL_DIR;
     if (p.empty() || !fs::is_directory(p)) return {};
     return p.string();
+}
+
+std::vector<Matrix4> parse_all_matrices(const std::string& xml) {
+    std::vector<Matrix4> out;
+    static const std::regex re(R"(<matrix>([^<]+)</matrix>)");
+    auto begin = std::sregex_iterator(xml.begin(), xml.end(), re);
+    auto end   = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::string body = (*it)[1].str();
+        Matrix4 mat{};
+        std::istringstream iss(body);
+        int i = 0;
+        double d;
+        while (i < 16 && (iss >> d)) mat.m[i++] = d;
+        if (i == 16) out.push_back(mat);
+    }
+    return out;
+}
+
+std::vector<Matrix4> parse_item_transforms(const std::string& xml) {
+    std::vector<Matrix4> out;
+    // Match transform="..." attribute on <item ...> elements.
+    // Use a named delimiter to avoid )" inside the raw string terminating early.
+    static const std::regex re(R"x(<item\s[^>]*transform="([^"]+)")x");
+    auto begin = std::sregex_iterator(xml.begin(), xml.end(), re);
+    auto end   = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::string body = (*it)[1].str();
+        // Parse 12 doubles: row-major columns: c0 c1 c2 c3
+        // c0=(r00,r10,r20) c1=(r01,r11,r21) c2=(r02,r12,r22) c3=(tx,ty,tz)
+        std::vector<double> v;
+        std::istringstream iss(body);
+        double d;
+        while (iss >> d) v.push_back(d);
+        if (v.size() != 12) continue;
+        // Convert to column-major 4x4 Matrix4.
+        // Column-major: m[col*4 + row]
+        // v[0..2] = column 0 (m[0..2])
+        // v[3..5] = column 1 (m[4..6])
+        // v[6..8] = column 2 (m[8..10])
+        // v[9..11] = column 3 = translation (m[12..14])
+        Matrix4 mat{};
+        mat.m[0] = v[0]; mat.m[1] = v[1]; mat.m[2] = v[2]; mat.m[3] = 0;
+        mat.m[4] = v[3]; mat.m[5] = v[4]; mat.m[6] = v[5]; mat.m[7] = 0;
+        mat.m[8] = v[6]; mat.m[9] = v[7]; mat.m[10] = v[8]; mat.m[11] = 0;
+        mat.m[12] = v[9]; mat.m[13] = v[10]; mat.m[14] = v[11]; mat.m[15] = 1;
+        out.push_back(mat);
+    }
+    return out;
 }
 
 } // namespace bambu_cli_test
