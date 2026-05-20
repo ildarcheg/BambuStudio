@@ -43,16 +43,28 @@ struct ManualTransform {
     double sx = 1, sy = 1, sz = 1;       // per-axis (uniform sets all three to s)
 };
 
-// Add a single-volume object to the named plate by loading <stl_path> via
-// libslic3r's load_stl. Stamps vol->source.input_file (G/Bug-B fix). Auto-
-// arranges within the plate's printable area. If no plate matches <plate_name>,
-// returns exit_code 6 (unknown_reference).
+// Add <count> copies of an STL as separate ModelObjects on the named plate.
+// Each copy is a deep-clone (add_object(const ModelObject&)) so it gets a
+// distinct internal ObjectID and 3MF object_id on save — required for the BBS
+// 3MF obj_inst_map to round-trip correctly (the loader keys on 3MF object_id;
+// duplicate keys collapse to one entry, breaking objects_and_instances rebuild).
+//
+// Stamps vol->source.input_file (G/Bug-B fix) on every volume of every copy.
+// Calls clear_instances() after each deep-copy (load_stl preserves the STL's
+// own instance vector; leaving it causes off-by-one in count).
+//
+// Auto-arrange uses a sqrt-grid layout (cell_size = max(bbox+margin, 20mm);
+// cols = ceil(sqrt(N)) derived from total count, not per-iteration).
+// Manual transforms use stacking mode (all N copies at the same pose).
+//
+// Off-bed AABB check (manual only) uses scale-only, rotation excluded —
+// matching the GUI's own off-bed approximation.
+// Multi-plate placement applies BBS stride (bed × 1.2) to the plate world
+// origin so objects land at correct world coords on plate > 1.
+//
 // <filament_idx>: -1 = not specified (skip extruder assignment); 1..N = 1-based
-// extruder slot. 0 or negative values != -1 → exit_code 1 (usage_error).
-// Out-of-range → exit_code 1 (usage_error); state is rolled back on failure.
-// <tf>: optional per-call manual transform; nullptr = auto-arrange.
-// <count>: number of copies (1..N); all copies receive the same T·R·S.
-// Off-bed AABB (manual transforms only) → exit_code 9 (placement_failure).
+// extruder slot. Out-of-range → exit_code 1 (usage_error); state rolled back.
+// <count>: clamped to max(1, count). Off-bed → exit_code 9 (placement_failure).
 OpResult add_object_to_plate(ProjectState& state,
                              const std::string& plate_name,
                              const std::string& stl_path,
