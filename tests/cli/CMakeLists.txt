@@ -12,6 +12,7 @@ set(BAMBU_CLI_TEST_SOURCES
     test_object_filament.cpp
     test_object_transforms.cpp
     test_config.cpp
+    test_plate_remove_rename.cpp
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
