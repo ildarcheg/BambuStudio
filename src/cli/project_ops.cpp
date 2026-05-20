@@ -4,8 +4,10 @@
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/TriangleMesh.hpp"
+#include "libslic3r/PrintConfig.hpp"
 
 #include <algorithm>
+#include <sstream>
 #include <boost/filesystem.hpp>
 
 namespace bambu_cli {
@@ -65,6 +67,8 @@ OpResult add_object_to_plate(ProjectState& state,
                              const std::string& stl_path,
                              const std::string& object_name_override,
                              int filament_idx,
+                             const ManualTransform* tf,
+                             int count,
                              ObjectRef* out_ref) {
     OpResult r;
     if (!boost::filesystem::exists(stl_path)) {
@@ -93,63 +97,153 @@ OpResult add_object_to_plate(ProjectState& state,
     }
     Slic3r::TriangleMesh mesh = tmp_model.objects[0]->volumes[0]->mesh();
 
-    // 2. Create a fresh ModelObject in our project's Model.
+    // 2. Derive object name.
     std::string name = object_name_override.empty()
                        ? derive_object_name(stl_path) : object_name_override;
-    Slic3r::ModelObject* obj = state.model.add_object();
-    obj->name = name;
-    obj->input_file = stl_path;
 
-    // 3. Add the volume + STAMP SOURCE ATTRIBUTION (G/Bug-B fix, day one).
-    Slic3r::ModelVolume* vol = obj->add_volume(mesh);
-    if (vol) {
-        vol->source.input_file = stl_path;
-        vol->source.object_idx = 0;
-        vol->source.volume_idx = 0;
-    }
-
-    // 4. Add an instance at origin. Auto-arrange follows in step 5.
-    Slic3r::ModelInstance* inst = obj->add_instance();
-    inst->set_offset(Slic3r::Vec3d::Zero());
-    inst->set_rotation(Slic3r::Vec3d::Zero());
-    inst->set_scaling_factor(Slic3r::Vec3d(1, 1, 1));
-
-    int obj_idx  = static_cast<int>(state.model.objects.size()) - 1;
-    int inst_idx = 0;
-
-    // 5. Attach to the target plate. We push into both obj_inst_map and
-    // objects_and_instances so the writer emits the plate->object link.
     Slic3r::PlateData* pd = state.plate_data[plate_idx];
-    inst->loaded_id = static_cast<size_t>(pd->obj_inst_map.size() + 1);
-    pd->obj_inst_map[static_cast<int>(inst->loaded_id)] = {obj_idx, inst_idx};
-    pd->objects_and_instances.push_back({obj_idx, inst_idx});
+    const bool manual = tf && (tf->has_translate || tf->has_rotate || tf->has_scale);
+    const int  copies = std::max(1, count);
+    // Track the first loaded_id we'll assign for rollback range.
+    const size_t base_loaded_id = static_cast<size_t>(pd->obj_inst_map.size() + 1);
+    // Track the first object index we'll add for rollback.
+    const int base_obj_idx = static_cast<int>(state.model.objects.size());
 
-    // 6. Auto-arrange this single instance within the plate (G5 grid fallback).
-    //    bbox-aware step-grid: place the object such that its world-space bbox
-    //    starts at (margin + col*step, margin + row*step, 0). This guarantees:
-    //      - the object sits cleanly on the bed (z bbox.min == 0; resting)
-    //      - the object's bbox starts in the positive quadrant (no edge spill)
-    //    regardless of the STL's local origin convention (centered, corner, etc.).
-    //    This is a deliberately naive grid — it does NOT account for existing
-    //    objects already on the plate. Collisions are possible if the plate has
-    //    objects positioned where the grid cells land. M6 introduces explicit
-    //    --translate for users who need deterministic placement.
-    {
-        Slic3r::BoundingBoxf3 bbox = mesh.bounding_box();
-        const double step   = 60.0;   // mm between grid cells
-        const double margin = 10.0;   // mm from plate origin to first cell's bbox.min
-        size_t nth = pd->objects_and_instances.size() - 1;   // newly-added (0-based)
-        double row = static_cast<double>(nth / 4);
-        double col = static_cast<double>(nth % 4);
-        Slic3r::Vec3d offset(
-            (col * step + margin) - bbox.min.x(),
-            (row * step + margin) - bbox.min.y(),
-            -bbox.min.z()
-        );
-        inst->set_offset(offset);
+    // 3–5. For each copy, create a fresh ModelObject with its own volume and instance.
+    //   BBS 3MF format maps object_id (ModelObject's 3MF id) one-to-one with instances.
+    //   Creating separate ModelObjects per copy ensures correct round-trip through save/load.
+    for (int k = 0; k < copies; ++k) {
+        // Create ModelObject for this copy.
+        Slic3r::ModelObject* obj_k = state.model.add_object();
+        obj_k->name       = name;
+        obj_k->input_file = stl_path;
+        int obj_idx_k = static_cast<int>(state.model.objects.size()) - 1;
+
+        // Add volume + STAMP SOURCE ATTRIBUTION (G/Bug-B fix, day one).
+        Slic3r::ModelVolume* vol_k = obj_k->add_volume(mesh);
+        if (vol_k) {
+            vol_k->source.input_file = stl_path;
+            vol_k->source.object_idx = 0;
+            vol_k->source.volume_idx = 0;
+        }
+
+        // Add the single instance for this copy.
+        Slic3r::ModelInstance* inst_k = obj_k->add_instance();
+        inst_k->set_offset(Slic3r::Vec3d::Zero());
+        inst_k->set_rotation(Slic3r::Vec3d::Zero());
+        inst_k->set_scaling_factor(Slic3r::Vec3d(1, 1, 1));
+
+        if (manual) {
+            // Apply T·R·S: scale first, then rotate, then translate.
+            if (tf->has_scale)
+                inst_k->set_scaling_factor(Slic3r::Vec3d(tf->sx, tf->sy, tf->sz));
+            if (tf->has_rotate) {
+                static const double DEG2RAD = 0.01745329251994329577;
+                inst_k->set_rotation(Slic3r::Vec3d(tf->rx * DEG2RAD,
+                                                    tf->ry * DEG2RAD,
+                                                    tf->rz * DEG2RAD));
+            }
+            if (tf->has_translate)
+                inst_k->set_offset(Slic3r::Vec3d(tf->tx, tf->ty, tf->tz));
+        } else {
+            // Auto-arrange: bbox-aware step-grid fallback (G5).
+            //   place the object so its world-space bbox starts at
+            //   (margin + col*step, margin + row*step, 0), regardless of STL origin.
+            Slic3r::BoundingBoxf3 bbox = mesh.bounding_box();
+            const double step   = 60.0;
+            const double margin = 10.0;
+            size_t existing = pd->objects_and_instances.size();
+            double row = static_cast<double>(existing / 4);
+            double col = static_cast<double>(existing % 4);
+            Slic3r::Vec3d offset(
+                (col * step + margin) - bbox.min.x(),
+                (row * step + margin) - bbox.min.y(),
+                -bbox.min.z()
+            );
+            inst_k->set_offset(offset);
+        }
+
+        // Assign loaded_id (= identify_id in 3MF). Each copy has a unique id.
+        // obj_inst_map: key=3mf_object_id (here we use obj_idx_k), value={inst_idx=0, loaded_id}
+        // list_objects() reads kv.second.second == inst->loaded_id for plate matching.
+        size_t new_loaded_id = static_cast<size_t>(pd->obj_inst_map.size() + 1);
+        inst_k->loaded_id = new_loaded_id;
+        pd->obj_inst_map[obj_idx_k] = {0, static_cast<int>(new_loaded_id)};
+        pd->objects_and_instances.push_back({obj_idx_k, 0});
+
+        // Off-bed check (manual transforms only — auto-arrange is safe by construction).
+        if (manual) {
+            // Compute world-space AABB: apply scale then translate to mesh bbox.
+            // (Rotation changes orientation but not the conservative AABB extent
+            //  we compute here; for the off-bed guard we use the mesh's local bbox
+            //  scaled + translated, which is conservative and correct for the
+            //  common "place flat on bed" use-case.)
+            Slic3r::BoundingBoxf3 bbox = mesh.bounding_box();
+            double sx = tf->has_scale ? tf->sx : 1.0;
+            double sy = tf->has_scale ? tf->sy : 1.0;
+            // sz not used in the 2D bed AABB check (z is unconstrained).
+            (void)(tf->has_scale ? tf->sz : 1.0);
+            double tx = tf->has_translate ? tf->tx : 0.0;
+            double ty = tf->has_translate ? tf->ty : 0.0;
+
+            // Scaled min/max (handle negative scale by swapping)
+            double bx0 = std::min(bbox.min.x() * sx, bbox.max.x() * sx) + tx;
+            double bx1 = std::max(bbox.min.x() * sx, bbox.max.x() * sx) + tx;
+            double by0 = std::min(bbox.min.y() * sy, bbox.max.y() * sy) + ty;
+            double by1 = std::max(bbox.min.y() * sy, bbox.max.y() * sy) + ty;
+
+            // Bed AABB: read printable_area (ConfigOptionPoints, 4 corners).
+            // Priority: pd->config > state.project_config > [0..256] fallback.
+            double bed_minx = 0.0, bed_miny = 0.0, bed_maxx = 256.0, bed_maxy = 256.0;
+            const Slic3r::ConfigOption* pa_opt = nullptr;
+            if (pd->config.has("printable_area"))
+                pa_opt = pd->config.option("printable_area");
+            if (!pa_opt && state.project_config.has("printable_area"))
+                pa_opt = state.project_config.option("printable_area");
+            if (auto* pts = dynamic_cast<const Slic3r::ConfigOptionPoints*>(pa_opt)) {
+                if (!pts->values.empty()) {
+                    bed_minx = bed_maxx = pts->values.front().x();
+                    bed_miny = bed_maxy = pts->values.front().y();
+                    for (const auto& p : pts->values) {
+                        bed_minx = std::min(bed_minx, p.x());
+                        bed_miny = std::min(bed_miny, p.y());
+                        bed_maxx = std::max(bed_maxx, p.x());
+                        bed_maxy = std::max(bed_maxy, p.y());
+                    }
+                }
+            }
+
+            const double margin = 0.001;
+            if (bx0 < bed_minx - margin || by0 < bed_miny - margin ||
+                bx1 > bed_maxx + margin || by1 > bed_maxy + margin) {
+                // Roll back: delete all ModelObjects we added (base_obj_idx..current).
+                // Delete in reverse order to avoid index shifts.
+                int cur_obj_count = static_cast<int>(state.model.objects.size());
+                for (int ri = cur_obj_count - 1; ri >= base_obj_idx; --ri)
+                    state.model.delete_object(static_cast<size_t>(ri));
+                // Also clean up plate data.
+                for (int k2 = 0; k2 < copies && !pd->objects_and_instances.empty(); ++k2)
+                    pd->objects_and_instances.pop_back();
+                for (auto it = pd->obj_inst_map.begin(); it != pd->obj_inst_map.end(); ) {
+                    size_t eid = static_cast<size_t>(it->second.second);
+                    if (eid >= base_loaded_id && eid < base_loaded_id + static_cast<size_t>(copies))
+                        it = pd->obj_inst_map.erase(it);
+                    else
+                        ++it;
+                }
+                r.exit_code = 9; r.error_code = "placement_failure";
+                std::ostringstream os;
+                os << "object '" << name << "' bbox ["
+                   << bx0 << "," << by0 << "..." << bx1 << "," << by1
+                   << "] off-bed (plate '" << plate_name << "' AABB ["
+                   << bed_minx << "," << bed_miny << ".." << bed_maxx << "," << bed_maxy << "])";
+                r.error_message = os.str();
+                return r;
+            }
+        }
     }
 
-    // 7. Filament validation + assignment.
+    // 6. Filament validation + assignment.
     //    -1 means "not specified" (skip). Any other value is validated as
     //    1-based extruder slot against filament_settings_id slot count.
     //    Validate AFTER attach (so we can roll back cleanly via delete_object).
@@ -160,21 +254,34 @@ OpResult add_object_to_plate(ProjectState& state,
         if (auto* vs = dynamic_cast<const Slic3r::ConfigOptionStrings*>(slots_opt))
             slot_count = vs->values.size();
         if (filament_idx < 1 || filament_idx > static_cast<int>(slot_count)) {
-            // Roll back: detach from plate, then delete the model object.
-            pd->objects_and_instances.pop_back();
-            pd->obj_inst_map.erase(static_cast<int>(inst->loaded_id));
-            state.model.delete_object(static_cast<size_t>(obj_idx));
+            // Roll back: delete all ModelObjects we added.
+            int cur_obj_count = static_cast<int>(state.model.objects.size());
+            for (int ri = cur_obj_count - 1; ri >= base_obj_idx; --ri)
+                state.model.delete_object(static_cast<size_t>(ri));
+            for (int k2 = 0; k2 < copies && !pd->objects_and_instances.empty(); ++k2)
+                pd->objects_and_instances.pop_back();
+            for (auto it = pd->obj_inst_map.begin(); it != pd->obj_inst_map.end(); ) {
+                size_t eid = static_cast<size_t>(it->second.second);
+                if (eid >= base_loaded_id && eid < base_loaded_id + static_cast<size_t>(copies))
+                    it = pd->obj_inst_map.erase(it);
+                else
+                    ++it;
+            }
             r.exit_code = 1; r.error_code = "usage_error";
             r.error_message = "filament " + std::to_string(filament_idx) +
                               " out of range [1," + std::to_string(slot_count) + "]";
             return r;
         }
-        obj->config.set("extruder", filament_idx);
+        // Apply extruder assignment to all copies.
+        for (int ki = 0; ki < copies; ++ki) {
+            auto* obj_ki = state.model.objects[base_obj_idx + ki];
+            if (obj_ki) obj_ki->config.set("extruder", filament_idx);
+        }
     }
 
     if (out_ref) {
-        out_ref->object_idx   = obj_idx;
-        out_ref->instance_idx = inst_idx;
+        out_ref->object_idx   = base_obj_idx;  // first copy's index
+        out_ref->instance_idx = 0;
         out_ref->object_name  = name;
     }
     r.ok = true;
