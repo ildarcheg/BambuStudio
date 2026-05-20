@@ -14,6 +14,7 @@ set(BAMBU_CLI_TEST_SOURCES
     test_config.cpp
     test_plate_remove_rename.cpp
     test_object_remove_set_filament.cpp
+    test_json_and_exit_codes.cpp
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
