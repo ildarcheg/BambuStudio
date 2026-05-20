@@ -6,8 +6,29 @@
 
 #include <memory>
 #include <sstream>
+#include <vector>
 
 namespace bambu_cli {
+
+// Parse "x,y[,z]" or uniform "s" into three doubles.
+// z_default is used when only 2 values are provided (translate/rotate use 0,
+// scale uses 1).
+// Returns false if the string is malformed.
+static bool parse_triple(const std::string& s, double& x, double& y, double& z,
+                         double z_default) {
+    if (s.empty()) return false;
+    std::vector<double> v;
+    std::string cur;
+    for (char c : s) {
+        if (c == ',') { v.push_back(std::stod(cur)); cur.clear(); }
+        else cur += c;
+    }
+    if (!cur.empty()) v.push_back(std::stod(cur));
+    if (v.size() == 1) { x = y = z = v[0]; return true; }   // uniform (e.g. scale)
+    if (v.size() == 2) { x = v[0]; y = v[1]; z = z_default; return true; }
+    if (v.size() == 3) { x = v[0]; y = v[1]; z = v[2]; return true; }
+    return false;
+}
 
 struct ObjectAddArgs {
     std::string in_path;
@@ -15,7 +36,11 @@ struct ObjectAddArgs {
     std::string stl;
     std::string name;
     std::string out_path;
-    int         filament = -1;  // -1 = not specified; 1..N = 1-based extruder slot
+    int         filament  = -1;  // -1 = not specified; 1..N = 1-based extruder slot
+    int         count     = 1;
+    std::string translate; // "x,y[,z]" in mm
+    std::string rotate;    // "rx,ry[,rz]" in degrees
+    std::string scale;     // uniform "s" OR per-axis "x,y[,z]"
 };
 
 struct ObjectListArgs {
@@ -34,15 +59,46 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     add->add_option("--stl",     a->stl,      "STL file to add")->required();
     add->add_option("--name",    a->name,     "explicit object name (default: stem of --stl)");
     add->add_option("--output",  a->out_path, "output .3mf (defaults to in-place)");
-    add->add_option("--filament", a->filament, "1-based extruder/filament slot");
+    add->add_option("--filament",  a->filament,  "1-based extruder/filament slot");
+    add->add_option("--count",     a->count,     "number of copies (default 1)");
+    add->add_option("--translate", a->translate, "x,y[,z] in plate-local mm");
+    add->add_option("--rotate",    a->rotate,    "rx,ry[,rz] in degrees");
+    add->add_option("--scale",     a->scale,     "uniform s OR per-axis x,y[,z]");
     add->callback([a, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
         ProjectState state;
         IoResult lr = load_project(a->in_path, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
+        // Build ManualTransform from flags (if any supplied).
+        ManualTransform tf;
+        if (!a->translate.empty()) {
+            tf.has_translate = true;
+            if (!parse_triple(a->translate, tf.tx, tf.ty, tf.tz, 0.0)) {
+                emit_error(mode, "usage_error", "bad --translate: " + a->translate);
+                std::exit(1);
+            }
+        }
+        if (!a->rotate.empty()) {
+            tf.has_rotate = true;
+            if (!parse_triple(a->rotate, tf.rx, tf.ry, tf.rz, 0.0)) {
+                emit_error(mode, "usage_error", "bad --rotate: " + a->rotate);
+                std::exit(1);
+            }
+        }
+        if (!a->scale.empty()) {
+            tf.has_scale = true;
+            if (!parse_triple(a->scale, tf.sx, tf.sy, tf.sz, 1.0)) {
+                emit_error(mode, "usage_error", "bad --scale: " + a->scale);
+                std::exit(1);
+            }
+        }
+        const ManualTransform* tf_ptr = (tf.has_translate || tf.has_rotate || tf.has_scale)
+                                        ? &tf : nullptr;
+
         ObjectRef ref;
-        OpResult op = add_object_to_plate(state, a->plate, a->stl, a->name, a->filament, &ref);
+        OpResult op = add_object_to_plate(state, a->plate, a->stl, a->name,
+                                          a->filament, tf_ptr, a->count, &ref);
         if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
 
         const std::string& out = a->out_path.empty() ? a->in_path : a->out_path;
