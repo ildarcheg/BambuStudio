@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/join.hpp>
@@ -491,24 +492,42 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
         return r;
     }
 
-    // Build a lookup set for O(1) membership test.
+    // Build a lookup set for O(1) membership test (used for objects_and_instances cleanup).
     std::vector<bool> is_removed(state.model.objects.size(), false);
     for (int idx : to_remove) is_removed[static_cast<size_t>(idx)] = true;
+
+    // Collect the loaded_id values of all instances belonging to the removed objects.
+    // This is the correct cross-format key for obj_inst_map cleanup:
+    //   - After load_project: obj_inst_map key=3mf_object_id, value={instance_id, loaded_id}
+    //   - After add_object_to_plate: obj_inst_map key=obj_idx, value={0, loaded_id}
+    // In both cases, value.second == loaded_id == ModelInstance::loaded_id.
+    // Removing by loaded_id set handles both formats correctly.
+    std::set<size_t> removed_loaded_ids;
+    for (int idx : to_remove) {
+        const auto* obj = state.model.objects[idx];
+        if (!obj) continue;
+        for (const auto* inst : obj->instances) {
+            if (inst && inst->loaded_id != 0)
+                removed_loaded_ids.insert(inst->loaded_id);
+        }
+    }
 
     // Step 1: detach all instances belonging to the removed objects from every plate.
     for (auto* pd : state.plate_data) {
         if (!pd) continue;
-        // objects_and_instances: remove entries whose .first is a removed index.
+        // objects_and_instances: keyed by (obj_idx, inst_idx) — remove by obj_idx membership.
         auto& oi = pd->objects_and_instances;
         oi.erase(std::remove_if(oi.begin(), oi.end(),
             [&](const std::pair<int,int>& p) {
                 int fi = p.first;
                 return fi >= 0 && fi < static_cast<int>(is_removed.size()) && is_removed[static_cast<size_t>(fi)];
             }), oi.end());
-        // obj_inst_map: remove entries whose value.first is a removed index.
+        // obj_inst_map: remove entries whose value.second (loaded_id) is in the removed set.
+        // Works correctly for both post-load (key=3mf_obj_id, value={inst_id, loaded_id})
+        // and post-add (key=obj_idx, value={0, loaded_id}) formats.
         for (auto it = pd->obj_inst_map.begin(); it != pd->obj_inst_map.end(); ) {
-            int fi = it->second.first;
-            if (fi >= 0 && fi < static_cast<int>(is_removed.size()) && is_removed[static_cast<size_t>(fi)])
+            size_t lid = static_cast<size_t>(it->second.second);
+            if (removed_loaded_ids.count(lid) > 0)
                 it = pd->obj_inst_map.erase(it);
             else
                 ++it;
