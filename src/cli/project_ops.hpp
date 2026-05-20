@@ -33,10 +33,13 @@ struct ObjectRef {
 // libslic3r's load_stl. Stamps vol->source.input_file (G/Bug-B fix). Auto-
 // arranges within the plate's printable area. If no plate matches <plate_name>,
 // returns exit_code 6 (unknown_reference).
+// <filament_idx> is 1-based extruder slot (0 = unset). Out-of-range ->
+// exit_code 1 (usage_error); state is rolled back on failure.
 OpResult add_object_to_plate(ProjectState& state,
                              const std::string& plate_name,
                              const std::string& stl_path,
                              const std::string& object_name,
+                             int filament_idx = 0,
                              ObjectRef* out_ref = nullptr);
 
 // List objects per plate (returns flat list of {plate_name, object_name}).

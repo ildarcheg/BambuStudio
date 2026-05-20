@@ -64,6 +64,7 @@ OpResult add_object_to_plate(ProjectState& state,
                              const std::string& plate_name,
                              const std::string& stl_path,
                              const std::string& object_name_override,
+                             int filament_idx,
                              ObjectRef* out_ref) {
     OpResult r;
     if (!boost::filesystem::exists(stl_path)) {
@@ -146,6 +147,27 @@ OpResult add_object_to_plate(ProjectState& state,
             -bbox.min.z()
         );
         inst->set_offset(offset);
+    }
+
+    // 7. Filament validation + assignment (1-based; 0 means unset).
+    //    Validate AFTER attach (so we can roll back cleanly).
+    if (filament_idx != 0) {
+        const Slic3r::ConfigOption* slots_opt =
+            state.project_config.option("filament_settings_id");
+        size_t slot_count = 0;
+        if (auto* vs = dynamic_cast<const Slic3r::ConfigOptionStrings*>(slots_opt))
+            slot_count = vs->values.size();
+        if (filament_idx < 1 || filament_idx > static_cast<int>(slot_count)) {
+            // Roll back: detach from plate, then delete the model object.
+            pd->objects_and_instances.pop_back();
+            pd->obj_inst_map.erase(static_cast<int>(inst->loaded_id));
+            state.model.delete_object(static_cast<size_t>(obj_idx));
+            r.exit_code = 1; r.error_code = "usage_error";
+            r.error_message = "filament " + std::to_string(filament_idx) +
+                              " out of range [1," + std::to_string(slot_count) + "]";
+            return r;
+        }
+        obj->config.set("extruder", filament_idx);
     }
 
     if (out_ref) {
