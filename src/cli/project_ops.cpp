@@ -124,13 +124,28 @@ OpResult add_object_to_plate(ProjectState& state,
     pd->objects_and_instances.push_back({obj_idx, inst_idx});
 
     // 6. Auto-arrange this single instance within the plate (G5 grid fallback).
-    //    step-grid: col * 60mm, row * 60mm within 4-column layout.
+    //    bbox-aware step-grid: place the object such that its world-space bbox
+    //    starts at (margin + col*step, margin + row*step, 0). This guarantees:
+    //      - the object sits cleanly on the bed (z bbox.min == 0; resting)
+    //      - the object's bbox starts in the positive quadrant (no edge spill)
+    //    regardless of the STL's local origin convention (centered, corner, etc.).
+    //    This is a deliberately naive grid — it does NOT account for existing
+    //    objects already on the plate. Collisions are possible if the plate has
+    //    objects positioned where the grid cells land. M6 introduces explicit
+    //    --translate for users who need deterministic placement.
     {
-        const double step = 60.0;   // mm
+        Slic3r::BoundingBoxf3 bbox = mesh.bounding_box();
+        const double step   = 60.0;   // mm between grid cells
+        const double margin = 10.0;   // mm from plate origin to first cell's bbox.min
         size_t nth = pd->objects_and_instances.size() - 1;   // newly-added (0-based)
         double row = static_cast<double>(nth / 4);
         double col = static_cast<double>(nth % 4);
-        inst->set_offset(Slic3r::Vec3d(col * step, row * step, 0.0));
+        Slic3r::Vec3d offset(
+            (col * step + margin) - bbox.min.x(),
+            (row * step + margin) - bbox.min.y(),
+            -bbox.min.z()
+        );
+        inst->set_offset(offset);
     }
 
     if (out_ref) {
