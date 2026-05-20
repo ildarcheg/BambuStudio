@@ -78,6 +78,14 @@ OpResult remove_plate(ProjectState& state, const std::string& name) {
     }
     delete pd;
     state.plate_data.erase(state.plate_data.begin() + idx);
+    // Re-assign plate_index values to ensure contiguous 0-based sequence.
+    // The BBS 3MF loader requires contiguous 1-based plater_ids on reload:
+    // it checks  if (plate_index_in_file > m_plater_data.size())  and rejects
+    // gaps.  Since we may have removed a plate from the middle, compact now.
+    for (int i = 0; i < static_cast<int>(state.plate_data.size()); ++i) {
+        if (state.plate_data[static_cast<size_t>(i)])
+            state.plate_data[static_cast<size_t>(i)]->plate_index = i;
+    }
     r.ok = true;
     return r;
 }
