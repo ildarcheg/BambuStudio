@@ -4,14 +4,16 @@
 cmake_minimum_required(VERSION 3.13)
 
 # Local-realistic fixture paths (per design spec §5).
-# CI runners without these paths still pass; tests SUCCEED+skip the dependent cases.
+# Defaults point at the in-repo copy under tests/cli/fixtures/local/ so a fresh
+# clone is self-contained. Override on the command line to point at a different
+# set, e.g. -DBAMBU_CLI_REFERENCE_3MF=/path/to/other.3mf
 set(BAMBU_CLI_REFERENCE_3MF
-    "C:/Users/ildarcheg/Documents/GitHub/slicer_tamplates/temp_project_for_bambu_studio.3mf"
+    "${CMAKE_SOURCE_DIR}/tests/cli/fixtures/local/temp_project_for_bambu_studio.3mf"
     CACHE FILEPATH
     "Canonical pre-configured reference 3MF for local dev + manual GUI smoke")
 
 set(BAMBU_CLI_STL_DIR
-    "C:/Users/ildarcheg/Documents/GitHub/slicer_tamplates"
+    "${CMAKE_SOURCE_DIR}/tests/cli/fixtures/local/stls"
     CACHE PATH
     "Directory containing 000_01_test_*.stl canonical fixtures")
 

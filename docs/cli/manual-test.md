@@ -12,22 +12,23 @@ automated.
 
 - `bambu-cli.exe` built at `build\src\cli\Release\bambu-cli.exe` (set `$cli`
   below to the actual path if different).
-- Canonical fixtures at `C:\Users\ildarcheg\Documents\GitHub\slicer_tamplates\`:
+- Canonical fixtures committed under `tests\cli\fixtures\local\` in this repo:
   - `temp_project_for_bambu_studio.3mf` -- pre-configured reference
     (1 plate, 4 filament slots, AMS configured).
-  - `000_01_test_cube.stl`
-  - `000_01_test_cylinder.stl`
-  - `000_01_test_cone.stl`
-  - `000_01_test_bambu_cube.stl`
+  - `stls\000_01_test_cube.stl`
+  - `stls\000_01_test_cylinder.stl`
+  - `stls\000_01_test_cone.stl`
+  - `stls\000_01_test_bambu_cube.stl`
 - Bambu Studio installed (used for layer-2 visual checks only).
 
-Set these variables at the top of your PowerShell session:
+Run this recipe from the repo root. Set these variables at the top of your
+PowerShell session:
 
 ```powershell
 $cli     = ".\build\src\cli\Release\bambu-cli.exe"
 $out     = "$env:TEMP\bcli_smoke.3mf"
-$ref     = "C:\Users\ildarcheg\Documents\GitHub\slicer_tamplates\temp_project_for_bambu_studio.3mf"
-$stldir  = "C:\Users\ildarcheg\Documents\GitHub\slicer_tamplates"
+$ref     = ".\tests\cli\fixtures\local\temp_project_for_bambu_studio.3mf"
+$stldir  = ".\tests\cli\fixtures\local\stls"
 ```
 
 ---
