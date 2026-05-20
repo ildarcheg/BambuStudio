@@ -22,4 +22,26 @@ OpResult add_plate(ProjectState& state, const std::string& name);
 // Get all plate names in order.
 std::vector<std::string> list_plate_names(const ProjectState& state);
 
+// Object handle returned by add_object_to_plate. Owns nothing; just an alias.
+struct ObjectRef {
+    int object_idx   = -1;
+    int instance_idx = -1;
+    std::string object_name;
+};
+
+// Add a single-volume object to the named plate by loading <stl_path> via
+// libslic3r's load_stl. Stamps vol->source.input_file (G/Bug-B fix). Auto-
+// arranges within the plate's printable area. If no plate matches <plate_name>,
+// returns exit_code 6 (unknown_reference).
+OpResult add_object_to_plate(ProjectState& state,
+                             const std::string& plate_name,
+                             const std::string& stl_path,
+                             const std::string& object_name,
+                             ObjectRef* out_ref = nullptr);
+
+// List objects per plate (returns flat list of {plate_name, object_name}).
+struct ListedObject { std::string plate_name; std::string object_name; int extruder; };
+std::vector<ListedObject> list_objects(const ProjectState& state,
+                                       const std::string& only_plate = {});
+
 } // namespace bambu_cli
