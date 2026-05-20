@@ -31,20 +31,36 @@ static Slic3r::LoadStrategy load_model_and_config() {
     return Slic3r::LoadStrategy::LoadModel | Slic3r::LoadStrategy::LoadConfig;
 }
 
-// --- G2 rebuild: PlateData::objects_and_instances from obj_inst_map ------
+// --- G2 rebuild: PlateData::objects_and_instances from model instances ----
+// After bbs_3mf loading, obj_inst_map[key] = (instance_id, identify_id/loaded_id).
+// The bbs_3mf reader stamps each ModelInstance::loaded_id = identify_id (bbs_3mf.cpp:2402).
+// We rebuild objects_and_instances (which the writer needs as (obj_idx, inst_idx)) by
+// matching each model instance's loaded_id against the identify_ids stored in obj_inst_map.
 static void rebuild_objects_and_instances(Slic3r::PlateDataPtrs& plates,
                                           const Slic3r::Model& model) {
+    // Build: loaded_id -> (obj_idx, inst_idx) from model
+    std::map<size_t, std::pair<int,int>> loaded_id_to_loc;
+    for (int oi = 0; oi < static_cast<int>(model.objects.size()); ++oi) {
+        const auto* obj = model.objects[oi];
+        if (!obj) continue;
+        for (int ii = 0; ii < static_cast<int>(obj->instances.size()); ++ii) {
+            const auto* inst = obj->instances[ii];
+            if (!inst || inst->loaded_id == 0) continue;
+            loaded_id_to_loc[inst->loaded_id] = {oi, ii};
+        }
+    }
+
     for (auto* plate : plates) {
         if (!plate) continue;
         plate->objects_and_instances.clear();
         for (const auto& kv : plate->obj_inst_map) {
-            const auto& pr = kv.second;   // (obj_idx, inst_idx)
-            // Validate before pushing.
-            if (pr.first  < 0 || pr.first  >= static_cast<int>(model.objects.size())) continue;
-            const auto* obj = model.objects[pr.first];
-            if (!obj) continue;
-            if (pr.second < 0 || pr.second >= static_cast<int>(obj->instances.size())) continue;
-            plate->objects_and_instances.push_back(pr);
+            // After bbs_3mf load: kv.second = (instance_id, identify_id/loaded_id)
+            size_t loaded_id = static_cast<size_t>(kv.second.second);
+            if (loaded_id == 0) continue;
+            auto it = loaded_id_to_loc.find(loaded_id);
+            if (it != loaded_id_to_loc.end()) {
+                plate->objects_and_instances.push_back(it->second);
+            }
         }
     }
 }
