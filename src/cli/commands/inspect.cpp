@@ -42,11 +42,12 @@ void register_inspect_subcommands(CLI::App& app, OutputMode* mode_out) {
         size_t filaments = filament_slot_count(state.project_config);
 
         if (mode == OutputMode::Json) {
-            std::ostringstream data;
-            data << "{\"plate_count\":" << plates
-                 << ",\"object_count\":" << objects
-                 << ",\"filament_count\":" << filaments << "}";
-            emit_ok(mode, "ok", "inspect ok", data.str());
+            nlohmann::json data = {
+                {"plate_count",    plates},
+                {"object_count",   objects},
+                {"filament_count", filaments},
+            };
+            emit_ok(mode, "ok", "inspect ok", data);
         } else {
             std::ostringstream msg;
             msg << "plates: " << plates << "  objects: " << objects

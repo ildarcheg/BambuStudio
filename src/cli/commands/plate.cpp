@@ -114,14 +114,11 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
 
         std::vector<std::string> names = list_plate_names(state);
         if (mode == OutputMode::Json) {
-            std::ostringstream d;
-            d << "{\"plate_count\":" << names.size() << ",\"plates\":[";
-            for (size_t i = 0; i < names.size(); ++i) {
-                if (i) d << ",";
-                d << "\"" << json_escape(names[i]) << "\"";
-            }
-            d << "]}";
-            emit_ok(mode, "ok", "plate list", d.str());
+            nlohmann::json data;
+            data["plate_count"] = names.size();
+            data["plates"]      = nlohmann::json::array();
+            for (const auto& n : names) data["plates"].push_back(n);
+            emit_ok(mode, "ok", "plate list", data);
         } else {
             std::ostringstream m;
             for (size_t i = 0; i < names.size(); ++i)

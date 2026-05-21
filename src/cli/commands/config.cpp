@@ -111,15 +111,16 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
         std::vector<ConfigEntry> entries = config_list(state, la->object_name, la->changed_only);
 
         if (mode == OutputMode::Json) {
-            std::ostringstream d;
-            d << "{\"count\":" << entries.size() << ",\"entries\":[";
-            for (size_t i = 0; i < entries.size(); ++i) {
-                if (i) d << ",";
-                d << "{\"key\":\"" << json_escape(entries[i].key)
-                  << "\",\"value\":\"" << json_escape(entries[i].value) << "\"}";
+            nlohmann::json data;
+            data["count"]   = entries.size();
+            data["entries"] = nlohmann::json::array();
+            for (const auto& e : entries) {
+                data["entries"].push_back({
+                    {"key",   e.key},
+                    {"value", e.value},
+                });
             }
-            d << "]}";
-            emit_ok(mode, "ok", "config list", d.str());
+            emit_ok(mode, "ok", "config list", data);
         } else {
             std::ostringstream m;
             for (const auto& e : entries)

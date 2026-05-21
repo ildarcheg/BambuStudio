@@ -122,16 +122,17 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
 
         std::vector<ListedObject> objs = list_objects(state, l->only_plate);
         if (mode == OutputMode::Json) {
-            std::ostringstream d;
-            d << "{\"object_count\":" << objs.size() << ",\"objects\":[";
-            for (size_t i = 0; i < objs.size(); ++i) {
-                if (i) d << ",";
-                d << "{\"plate\":\""    << json_escape(objs[i].plate_name)
-                  << "\",\"name\":\""   << json_escape(objs[i].object_name)
-                  << "\",\"extruder\":" << objs[i].extruder << "}";
+            nlohmann::json data;
+            data["object_count"] = objs.size();
+            data["objects"]      = nlohmann::json::array();
+            for (const auto& o : objs) {
+                data["objects"].push_back({
+                    {"plate",    o.plate_name},
+                    {"name",     o.object_name},
+                    {"extruder", o.extruder},
+                });
             }
-            d << "]}";
-            emit_ok(mode, "ok", "object list", d.str());
+            emit_ok(mode, "ok", "object list", data);
         } else {
             std::ostringstream m;
             for (const auto& o : objs)
