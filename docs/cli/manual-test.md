@@ -378,6 +378,6 @@ settings panel.
 
 `--count N` placements on plate K use a bed-aware stride
 `stride_xy = bed_extent * 1.2` per plate (matching BBS
-`PartPlateList::LOGICAL_PART_PLATE_GAP = 1/5`). On a 256 mm X1C bed plate 2
+`PartPlateList::LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2`). On a 256 mm X1C bed plate 2
 sits at world X = 307.2 mm; on a 400 mm bed plate 2 sits at 480 mm.
 Tested in `tests/cli/test_plate_stride.cpp`.

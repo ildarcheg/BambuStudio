@@ -156,7 +156,7 @@ static void get_bed_aabb(const Slic3r::PlateData* pd,
 // For our CLI purposes we only need stride (plate 1 → origin (0,0);
 // plate 2 → (stride_x, 0), etc.). Since we don't know total_plate_count
 // we use a fixed large-enough column count (e.g., ceil(sqrt(plate_index+1))).
-Slic3r::Vec3d plate_world_origin(int plate_index,
+Slic3r::Vec3d plate_world_origin(int plate_index_1based,
                                  double bed_width, double bed_height) {
     // BBS PartPlateList::LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2
     static const double LOGICAL_PART_PLATE_GAP = 0.2;
@@ -164,14 +164,14 @@ Slic3r::Vec3d plate_world_origin(int plate_index,
     double stride_y = bed_height * (1.0 + LOGICAL_PART_PLATE_GAP);
 
     // Use enough columns for the current plate (conservative estimate).
-    // The empirically-derived formula: cols = compute_colum_count(plate_index)
-    // For simplicity and CLI correctness, compute cols for plate_index plates.
-    float v = std::sqrt(static_cast<float>(plate_index));
+    // The empirically-derived formula: cols = compute_colum_count(plate_index_1based)
+    // For simplicity and CLI correctness, compute cols for plate_index_1based plates.
+    float v = std::sqrt(static_cast<float>(plate_index_1based));
     float rv = std::round(v);
     int cols = (v > rv) ? static_cast<int>(rv) + 1 : static_cast<int>(rv);
     if (cols < 1) cols = 1;
 
-    int pi = plate_index - 1;   // 0-based
+    int pi = plate_index_1based - 1;   // 0-based
     int plate_col = pi % cols;
     int plate_row = pi / cols;
     return Slic3r::Vec3d(
