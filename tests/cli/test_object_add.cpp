@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -34,13 +35,8 @@ TEST_CASE("object add: STL appears on plate; source_file stamped", "[m4][object_
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
-    SECTION("model_settings.config carries source_file for the new part (Bug B regression)") {
-        auto bytes = read_zip_entry(out, "Metadata/model_settings.config");
-        REQUIRE_FALSE(bytes.empty());
-        std::string xml(bytes.begin(), bytes.end());
-        REQUIRE(xml.find("source_file") != std::string::npos);
-        REQUIRE(xml.find("cube.stl")    != std::string::npos);
-    }
+    bambu_cli_test::run_all_basic(out);
+    bambu_cli_test::assert_parts_have_source_file(out);
 
     SECTION("object list reports the new object") {
         auto lr = spawn_cli({"--json", "object", "list", out});

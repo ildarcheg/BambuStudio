@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -27,6 +28,8 @@ TEST_CASE("config set: project-level line_width override persists in archive", "
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
+    bambu_cli_test::run_all_basic(out);
+
     // Verify via archive: Metadata/project_settings.config must contain line_width and 0.5.
     auto bytes = read_zip_entry(out, "Metadata/project_settings.config");
     REQUIRE_FALSE(bytes.empty());
@@ -54,6 +57,8 @@ TEST_CASE("config set --object: per-object override appears in model_settings.co
                         "--key", "line_width", "--value", "0.4"});
     INFO("config set stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // Verify via archive: Metadata/model_settings.config must contain line_width and 0.4.
     auto bytes = read_zip_entry(out, "Metadata/model_settings.config");
@@ -87,6 +92,8 @@ TEST_CASE("config list --changed-only: diff matches set/unset round-trip", "[m7]
     INFO("set stderr: " << set_r.stderr_text);
     REQUIRE(set_r.exit_code == 0);
 
+    bambu_cli_test::run_all_basic(out);
+
     // List changed-only — must include line_width=0.5.
     auto list_r = spawn_cli({"--json", "config", "list", out, "--changed-only"});
     INFO("list stderr: " << list_r.stderr_text);
@@ -110,6 +117,8 @@ TEST_CASE("config unset: removes the key", "[m7][config_unset]") {
     auto unset_r = spawn_cli({"config", "unset", out, "--key", "line_width"});
     INFO("unset stderr: " << unset_r.stderr_text);
     REQUIRE(unset_r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // List changed-only — must NOT contain the exact key "line_width" (it was unset).
     // Use the JSON key pattern to avoid false positives from keys that contain
@@ -138,6 +147,8 @@ TEST_CASE("config set: project-level override registers in different_settings_to
     auto set_r = spawn_cli({"config", "set", out, "--key", "line_width", "--value", "0.6"});
     INFO("set stderr: " << set_r.stderr_text);
     REQUIRE(set_r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // Verify via archive: project_settings.config must contain line_width=0.6
     // AND different_settings_to_system with line_width in position 0.
@@ -190,6 +201,8 @@ TEST_CASE("config set: project-level override registers in different_settings_to
     auto unset_r = spawn_cli({"config", "unset", out, "--key", "line_width"});
     INFO("unset stderr: " << unset_r.stderr_text);
     REQUIRE(unset_r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     {
         auto bytes2 = read_zip_entry(out, "Metadata/project_settings.config");

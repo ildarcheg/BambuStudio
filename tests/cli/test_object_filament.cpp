@@ -1,8 +1,8 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
-#include <regex>
 
 using namespace bambu_cli_test;
 namespace fs = boost::filesystem;
@@ -17,21 +17,6 @@ static std::string first_plate_name(const std::string& path) {
     return r.stdout_text.substr(p, q - p);
 }
 
-// Returns the substring of model_settings.config covering the <object> block
-// whose full text contains <name_substring>. This block holds both the
-// extruder metadata (at object level) and the nested <part> with source_file.
-// Empty if none found.
-static std::string object_block(const std::string& xml, const std::string& name_substring) {
-    static const std::regex obj_re(R"(<object[^>]*>([\s\S]*?)</object>)");
-    auto begin = std::sregex_iterator(xml.begin(), xml.end(), obj_re);
-    auto end   = std::sregex_iterator();
-    for (auto it = begin; it != end; ++it) {
-        std::string body = (*it).str();
-        if (body.find(name_substring) != std::string::npos) return body;
-    }
-    return {};
-}
-
 TEST_CASE("object add --filament 2: <part> has BOTH extruder=2 AND source_file (Bug B regression)",
           "[m5][object_filament][bug_b]") {
     const std::string out = fresh_temp_path(".3mf");
@@ -44,25 +29,9 @@ TEST_CASE("object add --filament 2: <part> has BOTH extruder=2 AND source_file (
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
-    auto bytes = read_zip_entry(out, "Metadata/model_settings.config");
-    REQUIRE_FALSE(bytes.empty());
-    std::string xml(bytes.begin(), bytes.end());
-
-    // The serializer writes extruder at the <object> level, source_file inside
-    // the nested <part> — both within the same <object> block.
-    std::string body = object_block(xml, "cube");
-    REQUIRE_FALSE(body.empty());
-
-    SECTION("source_file attribution present (Bug B fix proof)") {
-        REQUIRE(body.find("source_file") != std::string::npos);
-        REQUIRE(body.find("cube.stl")    != std::string::npos);
-    }
-    SECTION("extruder = 2 set on this <object>") {
-        // Bambu Studio writes <metadata key="extruder" value="2"/> at the
-        // object level (not inside <part>), but still within the <object> block.
-        std::regex extr_re(R"(extruder[^>]*value\s*=\s*"2")");
-        REQUIRE(std::regex_search(body, extr_re));
-    }
+    bambu_cli_test::run_all_basic(out);
+    bambu_cli_test::assert_parts_have_source_file(out);
+    bambu_cli_test::assert_object_extruder(out, "cube", 2);
 
     fs::remove(out);
 }

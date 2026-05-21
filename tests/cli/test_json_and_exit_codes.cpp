@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>

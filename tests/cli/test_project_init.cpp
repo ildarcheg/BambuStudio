@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -20,21 +21,7 @@ TEST_CASE("project init: happy path clones committed reference 3mf", "[m1][proje
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(out));
 
-    SECTION("guard check (b): plate_1.png and plate_1_small.png present") {
-        auto big   = read_zip_entry(out, "Metadata/plate_1.png");
-        auto small = read_zip_entry(out, "Metadata/plate_1_small.png");
-        REQUIRE_FALSE(big.empty());
-        REQUIRE_FALSE(small.empty());
-    }
-
-    SECTION("guard check (a): all .rels Targets resolve") {
-        auto entries = list_zip_entries(out);
-        REQUIRE_FALSE(entries.empty());
-        // Existence check for the headline relationships file.
-        bool has_root_rels = false;
-        for (const auto& e : entries) if (e == "_rels/.rels") { has_root_rels = true; break; }
-        REQUIRE(has_root_rels);
-    }
+    bambu_cli_test::run_all_basic(out);
 
     fs::remove(out);
 }

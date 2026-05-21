@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -37,6 +38,8 @@ TEST_CASE("object add --translate places object at given offset", "[m6][transfor
                         "--translate", "50,40"});
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // Archive-level: instance transforms are stored as the <item transform="...">
     // attribute in 3D/3dmodel.model (12-element row-major; tx=v[9], ty=v[10]).
@@ -102,6 +105,8 @@ TEST_CASE("object add --count 3 --translate stacks 3 copies", "[m6][transforms][
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
+    bambu_cli_test::run_all_basic(out);
+
     auto lr = spawn_cli({"--json", "object", "list", out});
     REQUIRE(lr.exit_code == 0);
     // 3 instances of one object — list_objects iterates via loaded_id/obj_inst_map,
@@ -146,6 +151,8 @@ TEST_CASE("object add --count 3: N ModelObjects, sqrt-grid, correct list rows [M
                          "--stl", stl, "--count", "3"});
     INFO("add stderr: " << ar.stderr_text);
     REQUIRE(ar.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // 3. Reload and inspect: object_count delta must be exactly 3 (one per copy).
     //    The BBS 3MF format requires distinct 3MF object_ids per plate entry;

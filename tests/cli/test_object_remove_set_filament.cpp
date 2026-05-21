@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -18,19 +19,6 @@ static std::string first_plate_name(const std::string& path) {
     return r.stdout_text.substr(p, q - p);
 }
 
-// Returns the substring of model_settings.config covering the <object> block
-// whose full text contains <name_substring>. Empty if none found.
-static std::string object_block(const std::string& xml, const std::string& name_substring) {
-    static const std::regex obj_re(R"(<object[^>]*>([\s\S]*?)</object>)");
-    auto begin = std::sregex_iterator(xml.begin(), xml.end(), obj_re);
-    auto end   = std::sregex_iterator();
-    for (auto it = begin; it != end; ++it) {
-        std::string body = (*it).str();
-        if (body.find(name_substring) != std::string::npos) return body;
-    }
-    return {};
-}
-
 // -------------------------------------------------------------------
 // Case 1: object remove — object is gone from the archive
 // -------------------------------------------------------------------
@@ -45,6 +33,8 @@ TEST_CASE("object remove: object gone from archive", "[m9][object_remove]") {
     auto r = spawn_cli({"object", "remove", out, "--name", "cube"});
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // Verify: model_settings.config should contain no reference to cube.stl.
     auto bytes = read_zip_entry(out, "Metadata/model_settings.config");
@@ -71,21 +61,9 @@ TEST_CASE("object set-filament: retrofit preserves source_file (Bug B retrofit g
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
-    auto bytes = read_zip_entry(out, "Metadata/model_settings.config");
-    REQUIRE_FALSE(bytes.empty());
-    std::string xml(bytes.begin(), bytes.end());
-
-    std::string body = object_block(xml, "cube");
-    REQUIRE_FALSE(body.empty());
-
-    SECTION("source_file attribution present (Bug B retrofit proof)") {
-        REQUIRE(body.find("source_file") != std::string::npos);
-        REQUIRE(body.find("cube.stl")    != std::string::npos);
-    }
-    SECTION("extruder = 3 set on this <object>") {
-        std::regex extr_re(R"(extruder[^>]*value\s*=\s*"3")");
-        REQUIRE(std::regex_search(body, extr_re));
-    }
+    bambu_cli_test::run_all_basic(out);
+    bambu_cli_test::assert_parts_have_source_file(out);
+    bambu_cli_test::assert_object_extruder(out, "cube", 3);
 
     fs::remove(out);
 }
@@ -134,6 +112,8 @@ TEST_CASE("object remove: removes all N copies by name", "[m9][object_remove][gr
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
+    bambu_cli_test::run_all_basic(out);
+
     // Verify 0 objects named "cube" remain.
     {
         auto lr = spawn_cli({"--json", "object", "list", out});
@@ -168,6 +148,8 @@ TEST_CASE("object set-filament: stamps extruder on all N copies by name",
     auto r = spawn_cli({"object", "set-filament", out, "--name", "cube", "--filament", "2"});
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // Inspect model_settings.config: all 3 <object> blocks for "cube" must have
     // extruder=2 AND source_file referencing cube.stl.

@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -16,10 +17,7 @@ TEST_CASE("plate add: appends new plate; runtime guard passes", "[m3][plate_add]
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(out));
 
-    SECTION("archive contains plate_2.png and plate_2_small.png (G3)") {
-        REQUIRE_FALSE(read_zip_entry(out, "Metadata/plate_2.png").empty());
-        REQUIRE_FALSE(read_zip_entry(out, "Metadata/plate_2_small.png").empty());
-    }
+    bambu_cli_test::run_all_basic(out);
 
     SECTION("inspect reports plate_count = 2") {
         auto ir = spawn_cli({"--json", "inspect", out});

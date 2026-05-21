@@ -4,6 +4,7 @@
 set(BAMBU_CLI_TEST_SOURCES
     cli_tests_main.cpp
     test_helpers.cpp
+    archive_invariants.cpp
     test_project_init.cpp
     test_inspect.cpp
     test_plate_add.cpp

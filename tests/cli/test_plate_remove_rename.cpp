@@ -1,4 +1,5 @@
 #include "test_helpers.hpp"
+#include "archive_invariants.hpp"
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
@@ -47,6 +48,8 @@ TEST_CASE("plate remove: empty plate is removed", "[m8][plate_remove]") {
     INFO("plate remove stderr: " << rem_r.stderr_text);
     REQUIRE(rem_r.exit_code == 0);
 
+    bambu_cli_test::run_all_basic(out);
+
     // Verify "to-remove" is gone from plate list.
     auto names = get_plate_names(out);
     for (const auto& n : names) {
@@ -94,6 +97,8 @@ TEST_CASE("plate rename: name updated, no duplicates created", "[m8][plate_renam
     auto ren_r = spawn_cli({"plate", "rename", out, "--from", "oldname", "--to", "newname"});
     INFO("plate rename stderr: " << ren_r.stderr_text);
     REQUIRE(ren_r.exit_code == 0);
+
+    bambu_cli_test::run_all_basic(out);
 
     // Verify "newname" exists and "oldname" is gone.
     auto names = get_plate_names(out);
