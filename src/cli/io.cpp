@@ -151,10 +151,33 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         return r;
     }
 
-    // 5. Atomic rename. boost::filesystem::rename is atomic on same FS.
+    // 5. Safer atomic .bak-swap: rename dst -> .bak, rename tmp -> dst,
+    //    remove .bak. The destination is never absent during the swap; if
+    //    the middle rename fails we restore the original from .bak.
+    //    Ported from OrcaSlicer/src/cli/io.cpp:467-499 (their "M11 cleanup").
+    //    Eliminates the prior window between remove(out_path) and
+    //    rename(tmp -> out_path) where a crash would leave no file at the
+    //    destination.
+    const std::string bak = out_path + ".bak";
     try {
-        if (fs::exists(out_path)) fs::remove(out_path);
-        fs::rename(tmp_path, out_path);
+        if (fs::exists(out_path)) {
+            fs::remove(bak);   // clean any stale leftover
+            fs::rename(out_path, bak);
+        }
+        try {
+            fs::rename(tmp_path, out_path);
+        } catch (...) {
+            // Best-effort restore: put the original back from .bak.
+            if (fs::exists(bak)) {
+                boost::system::error_code rec;
+                fs::rename(bak, out_path, rec);
+            }
+            throw;
+        }
+        if (fs::exists(bak)) {
+            boost::system::error_code rm_ec;
+            fs::remove(bak, rm_ec);   // best-effort; stale .bak is harmless
+        }
     } catch (const std::exception& e) {
         fs::remove(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
