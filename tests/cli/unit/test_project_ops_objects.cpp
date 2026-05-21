@@ -199,16 +199,9 @@ TEST_CASE("list_objects: returns plate-attributed entries with extruders",
     REQUIRE(objs[0].extruder    == 2);
 }
 
-// NOTE: A "cross-plate exclusion" test (object on plate A should NOT
-// appear when filtering for plate B) is intentionally omitted here.
-// add_object_to_plate computes loaded_id per-plate
-// (base_loaded_id = pd->obj_inst_map.size() + 1), so two freshly-empty
-// plates both produce loaded_id=1 — list_objects then matches by
-// loaded_id and returns both regardless of plate filter. This is a
-// latent bug in project_ops.cpp that out-of-scope for Task 4 (unit
-// test coverage). When that bug is fixed, add a TEST_CASE here that
-// places objects on two distinct plates and asserts that
-// list_objects(state, plate_A) returns only plate_A's objects.
+// Same-plate inclusion + nonexistent-plate exclusion are easier to
+// state than cross-plate exclusion; both are covered. Cross-plate
+// exclusion is now covered by the next TEST_CASE.
 TEST_CASE("list_objects: --plate filter — same-plate inclusion + nonexistent-plate exclusion",
           "[unit][objects]") {
     ProjectState s;
@@ -227,6 +220,41 @@ TEST_CASE("list_objects: --plate filter — same-plate inclusion + nonexistent-p
     auto on_nowhere = bambu_cli::list_objects(s, "NoSuchPlate");
     REQUIRE(on_nowhere.empty());
 
+    auto all = bambu_cli::list_objects(s, "");
+    REQUIRE(all.size() == 2);
+}
+
+TEST_CASE("list_objects: --plate filter excludes objects from other plates",
+          "[unit][objects][cross_plate]") {
+    // Regression test for the loaded_id collision bug: previously,
+    // base_loaded_id = pd->obj_inst_map.size() + 1 produced the same
+    // loaded_id for objects added to different freshly-empty plates,
+    // making cross-plate filtering return both objects.  Fixed by
+    // computing the global max(loaded_id) + 1 instead.
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::add_plate(s, "Plate-2").ok);
+
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, first_plate(s), stl, "p1obj", -1, nullptr, 1, nullptr).ok);
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, "Plate-2", stl, "p2obj", -1, nullptr, 1, nullptr).ok);
+
+    // Sanity: both objects exist.
+    REQUIRE(s.model.objects.size() == 2);
+
+    // The fix: filtering by plate-1 returns ONLY p1obj.
+    auto on_p1 = bambu_cli::list_objects(s, first_plate(s));
+    REQUIRE(on_p1.size() == 1);
+    REQUIRE(on_p1[0].object_name == "p1obj");
+
+    // Filtering by Plate-2 returns ONLY p2obj.
+    auto on_p2 = bambu_cli::list_objects(s, "Plate-2");
+    REQUIRE(on_p2.size() == 1);
+    REQUIRE(on_p2[0].object_name == "p2obj");
+
+    // No filter returns both.
     auto all = bambu_cli::list_objects(s, "");
     REQUIRE(all.size() == 2);
 }

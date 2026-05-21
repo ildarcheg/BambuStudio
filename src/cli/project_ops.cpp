@@ -235,7 +235,29 @@ OpResult add_object_to_plate(ProjectState& state,
     const bool manual = tf && (tf->has_translate || tf->has_rotate || tf->has_scale);
 
     // Track rollback range.
-    const size_t base_loaded_id = static_cast<size_t>(pd->obj_inst_map.size() + 1);
+    // loaded_id is the 3MF identify_id and MUST be globally unique within
+    // the project. Earlier implementations sized this from pd->obj_inst_map.size()
+    // per-plate, which collided across freshly-empty plates — list_objects
+    // then returned cross-plate matches for any filter. Compute the global
+    // max across all plates' obj_inst_map entries AND all ModelInstance
+    // loaded_ids (post-load 3MF state) and add 1.
+    size_t max_existing_loaded_id = 0;
+    for (const auto* p : state.plate_data) {
+        if (!p) continue;
+        for (const auto& kv : p->obj_inst_map) {
+            size_t lid = static_cast<size_t>(kv.second.second);
+            if (lid > max_existing_loaded_id) max_existing_loaded_id = lid;
+        }
+    }
+    for (const auto* mo : state.model.objects) {
+        if (!mo) continue;
+        for (const auto* inst : mo->instances) {
+            if (!inst) continue;
+            size_t lid = static_cast<size_t>(inst->loaded_id);
+            if (lid > max_existing_loaded_id) max_existing_loaded_id = lid;
+        }
+    }
+    const size_t base_loaded_id = max_existing_loaded_id + 1;
     const int    base_obj_idx   = static_cast<int>(state.model.objects.size());
 
     // Compute bed AABB and plate-world origin.
