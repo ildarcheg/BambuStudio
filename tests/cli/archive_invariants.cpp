@@ -6,11 +6,15 @@
 #include <algorithm>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
 namespace bambu_cli_test {
+
+static std::string regex_escape(const std::string& s) {
+    static const std::regex meta(R"([.^$|()\[\]{}*+?\\])");
+    return std::regex_replace(s, meta, R"(\$&)");
+}
 
 static std::string read_entry_string(const std::string& zip_path,
                                      const std::string& entry) {
@@ -154,11 +158,11 @@ void assert_object_extruder(const std::string& zip_path,
     auto end = std::sregex_iterator();
     for (; it != end; ++it) {
         const std::string inner = (*it)[1].str();
-        std::regex name_re(R"re(key\s*=\s*"name"[^/]*value\s*=\s*")re" + obj_name +
-                           "\"");
+        std::regex name_re(R"re(key\s*=\s*"name"[^/]*value\s*=\s*")re" +
+                           regex_escape(obj_name) + "\"");
         if (std::regex_search(inner, name_re)) {
             std::regex extr_re(R"re(key\s*=\s*"extruder"[^/]*value\s*=\s*")re" +
-                               std::to_string(slot) + "\"");
+                               regex_escape(std::to_string(slot)) + "\"");
             if (!std::regex_search(inner, extr_re))
                 FAIL("<object name='" << obj_name <<
                      "'> lacks extruder=" << slot);
@@ -172,6 +176,7 @@ void run_all_basic(const std::string& zip_path) {
     assert_relationships_resolve(zip_path);
     assert_plate_thumbnails_128(zip_path);
     assert_printable_area_4_points(zip_path);
+    SUCCEED("run_all_basic passed for " << zip_path);
 }
 
 } // namespace bambu_cli_test
