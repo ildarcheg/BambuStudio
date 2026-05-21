@@ -199,32 +199,34 @@ TEST_CASE("list_objects: returns plate-attributed entries with extruders",
     REQUIRE(objs[0].extruder    == 2);
 }
 
-TEST_CASE("list_objects: --plate filter restricts to one plate",
+// NOTE: A "cross-plate exclusion" test (object on plate A should NOT
+// appear when filtering for plate B) is intentionally omitted here.
+// add_object_to_plate computes loaded_id per-plate
+// (base_loaded_id = pd->obj_inst_map.size() + 1), so two freshly-empty
+// plates both produce loaded_id=1 — list_objects then matches by
+// loaded_id and returns both regardless of plate filter. This is a
+// latent bug in project_ops.cpp that out-of-scope for Task 4 (unit
+// test coverage). When that bug is fixed, add a TEST_CASE here that
+// places objects on two distinct plates and asserts that
+// list_objects(state, plate_A) returns only plate_A's objects.
+TEST_CASE("list_objects: --plate filter — same-plate inclusion + nonexistent-plate exclusion",
           "[unit][objects]") {
-    // NOTE: loaded_id uniqueness is per-plate in the current implementation
-    // (base_loaded_id = pd->obj_inst_map.size() + 1). Two freshly-created empty
-    // plates both produce loaded_id=1 for their first object, so cross-plate
-    // filtering via list_objects cannot be reliably unit-tested without a fixture
-    // that already has objects loaded (which assigns non-colliding loaded_ids).
-    // This test verifies the filter against a non-existent plate (empty result)
-    // and against the real plate (non-empty result).
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::add_plate(s, "Plate-2").ok);
     const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    // Both objects on the SAME plate to avoid the loaded_id collision.
     REQUIRE(bambu_cli::add_object_to_plate(
         s, first_plate(s), stl, "obj1", -1, nullptr, 1, nullptr).ok);
     REQUIRE(bambu_cli::add_object_to_plate(
         s, first_plate(s), stl, "obj2", -1, nullptr, 1, nullptr).ok);
 
-    // Filter for the real plate: should return both objects.
-    auto on_real = bambu_cli::list_objects(s, first_plate(s));
-    REQUIRE(on_real.size() == 2);
+    auto on_plate1 = bambu_cli::list_objects(s, first_plate(s));
+    REQUIRE(on_plate1.size() == 2);
 
-    // Filter for a non-existent plate: should return nothing.
-    auto on_none = bambu_cli::list_objects(s, "NoSuchPlate");
-    REQUIRE(on_none.empty());
+    auto on_nowhere = bambu_cli::list_objects(s, "NoSuchPlate");
+    REQUIRE(on_nowhere.empty());
 
-    // No filter: returns all objects across all plates.
     auto all = bambu_cli::list_objects(s, "");
     REQUIRE(all.size() == 2);
 }

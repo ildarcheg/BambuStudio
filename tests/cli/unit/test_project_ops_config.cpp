@@ -7,6 +7,7 @@
 using bambu_cli::ProjectState;
 
 static std::string first_plate(const ProjectState& s) {
+    REQUIRE_FALSE(s.plate_data.empty());
     return s.plate_data.front()->plate_name;
 }
 
@@ -93,9 +94,11 @@ TEST_CASE("config_unset project-level: clears key and untracks it",
 TEST_CASE("config_unset: key not set -> unknown_reference", "[unit][config]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    // Set and then unset line_width, then try to unset again.
-    // The second unset hits the "key not currently set" path regardless of
-    // whether the reference fixture has a default value for the key.
+    // Test the "key not currently set" path of config_unset. The reference
+    // fixture pre-sets line_width="0.42", so the simpler "load + unset"
+    // shape works in practice; the set+unset+unset shape below makes the
+    // expectation independent of fixture state. Either approach exercises
+    // the unknown_reference branch.
     REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
     REQUIRE(bambu_cli::config_unset(s, "", "line_width").ok);
     auto r = bambu_cli::config_unset(s, "", "line_width");

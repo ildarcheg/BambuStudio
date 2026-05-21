@@ -2,9 +2,6 @@
 #include "../test_helpers.hpp"
 #include "io.hpp"
 
-#include <libslic3r/Model.hpp>
-#include <libslic3r/PrintConfig.hpp>
-
 #include <catch2/catch.hpp>
 
 namespace bambu_cli_unit {
