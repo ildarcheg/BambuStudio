@@ -1,0 +1,140 @@
+#include <catch2/catch.hpp>
+#include "unit_helpers.hpp"
+#include "project_ops.hpp"
+
+#include <libslic3r/PrintConfig.hpp>
+
+using bambu_cli::ProjectState;
+
+static std::string first_plate(const ProjectState& s) {
+    return s.plate_data.front()->plate_name;
+}
+
+TEST_CASE("config_set project-level: stores value on project_config",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
+    REQUIRE(s.project_config.has("line_width"));
+    REQUIRE(s.project_config.opt_serialize("line_width") == "0.5");
+}
+
+TEST_CASE("config_set project-level: registers in different_settings_to_system",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
+    const auto* opt = s.project_config.option("different_settings_to_system");
+    REQUIRE(opt != nullptr);
+    const auto* vs =
+        dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt);
+    REQUIRE(vs != nullptr);
+    REQUIRE_FALSE(vs->values.empty());
+    REQUIRE(vs->values[0].find("line_width") != std::string::npos);
+}
+
+TEST_CASE("config_set: unknown key -> bad_config", "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto r = bambu_cli::config_set(s, "", "no_such_key_xyz", "1");
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.error_code == "bad_config");
+    REQUIRE(r.exit_code == 4);
+}
+
+TEST_CASE("config_set: different_settings_to_system is rejected (system-managed)",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto r = bambu_cli::config_set(s, "", "different_settings_to_system", "x");
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.error_code == "bad_config");
+}
+
+TEST_CASE("config_set --object: stores on per-object config",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, first_plate(s), stl, "", -1, nullptr, 1, nullptr).ok);
+
+    REQUIRE(bambu_cli::config_set(s, "cube", "line_width", "0.4").ok);
+    REQUIRE(s.model.objects[0]->config.has("line_width"));
+    REQUIRE(s.model.objects[0]->config.opt_serialize("line_width") == "0.4");
+}
+
+TEST_CASE("config_set --object: object not found -> unknown_reference",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto r = bambu_cli::config_set(s, "missing", "line_width", "0.4");
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.error_code == "unknown_reference");
+}
+
+TEST_CASE("config_unset project-level: clears key and untracks it",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
+    REQUIRE(bambu_cli::config_unset(s, "", "line_width").ok);
+    REQUIRE_FALSE(s.project_config.has("line_width"));
+    // Untrack: the key should NOT be in different_settings_to_system slot 0.
+    const auto* opt = s.project_config.option("different_settings_to_system");
+    if (opt) {
+        const auto* vs =
+            dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt);
+        if (vs && !vs->values.empty())
+            REQUIRE(vs->values[0].find("line_width") == std::string::npos);
+    }
+}
+
+TEST_CASE("config_unset: key not set -> unknown_reference", "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    // Set and then unset line_width, then try to unset again.
+    // The second unset hits the "key not currently set" path regardless of
+    // whether the reference fixture has a default value for the key.
+    REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
+    REQUIRE(bambu_cli::config_unset(s, "", "line_width").ok);
+    auto r = bambu_cli::config_unset(s, "", "line_width");
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.error_code == "unknown_reference");
+}
+
+TEST_CASE("config_unset: unknown key -> bad_config", "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto r = bambu_cli::config_unset(s, "", "no_such_key_xyz");
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.error_code == "bad_config");
+}
+
+TEST_CASE("config_list: returns all keys when not changed-only",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto entries = bambu_cli::config_list(s, "", /*changed_only=*/false);
+    REQUIRE(entries.size() > 100);   // reference 3mf has many keys
+}
+
+TEST_CASE("config_list --changed-only: includes a freshly-set key",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
+    auto entries = bambu_cli::config_list(s, "", /*changed_only=*/true);
+    bool found = false;
+    for (const auto& e : entries)
+        if (e.key == "line_width") { found = true; break; }
+    REQUIRE(found);
+}
+
+TEST_CASE("config_list --object: returns empty for unknown object",
+          "[unit][config]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto entries = bambu_cli::config_list(s, "ghost", /*changed_only=*/false);
+    REQUIRE(entries.empty());
+}

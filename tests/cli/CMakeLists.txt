@@ -17,6 +17,10 @@ set(BAMBU_CLI_TEST_SOURCES
     test_object_remove_set_filament.cpp
     test_json_and_exit_codes.cpp
     test_plate_stride.cpp
+    unit/unit_helpers.cpp
+    unit/test_project_ops_plates.cpp
+    unit/test_project_ops_objects.cpp
+    unit/test_project_ops_config.cpp
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
@@ -29,6 +33,8 @@ add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
     # -> bbs_3mf.hpp -> NSVGUtils.hpp).
     ${CMAKE_SOURCE_DIR}/src/cli/nanosvg_impl.cpp
     ${CMAKE_SOURCE_DIR}/src/cli/project_ops.cpp
+    ${CMAKE_SOURCE_DIR}/src/cli/io.cpp
+    ${CMAKE_SOURCE_DIR}/src/cli/invariant_guard.cpp
 )
 target_link_libraries(cli_tests PRIVATE test_common libslic3r OpenSSL::Crypto)
 if(WIN32)
