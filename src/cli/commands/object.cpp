@@ -165,24 +165,30 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     // --- object set-filament ------------------------------------------
     // Stamps extruder=N on ALL ModelObjects with the given name (group-by-name).
     // Applies Bug B retrofit guard before setting the extruder key.
-    struct SFArgs { std::string in, name, out; int filament = 0; };
+    struct SFArgs { std::string in, name, out; int filament = 0; int part = -1; };
     auto* sf = object->add_subcommand("set-filament", "retrofit filament slot on all objects with the given name");
     auto sa = std::make_shared<SFArgs>();
     sf->add_option("in",         sa->in,       "input .3mf")->required();
     sf->add_option("--name",     sa->name,     "object name (all copies updated)")->required();
     sf->add_option("--filament", sa->filament, "1-based filament slot")->required();
+    sf->add_option("--part",     sa->part,     "0-based volume/part index (omit for object-level)");
     sf->add_option("--output",   sa->out,      "output .3mf (defaults to in-place)");
     sf->callback([sa, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
         ProjectState state;
         IoResult lr = load_project(sa->in, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-        OpResult op = set_object_filament(state, sa->name, sa->filament);
+        OpResult op = set_object_filament(state, sa->name, sa->filament, sa->part);
         if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
         const std::string& out = sa->out.empty() ? sa->in : sa->out;
         IoResult sr = save_project(state, out);
         if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-        emit_ok(mode, "ok", "set-filament: " + sa->name + " -> " + std::to_string(sa->filament));
+        if (sa->part >= 0) {
+            emit_ok(mode, "ok", "set-filament: " + sa->name + " part " + std::to_string(sa->part) +
+                                " -> " + std::to_string(sa->filament));
+        } else {
+            emit_ok(mode, "ok", "set-filament: " + sa->name + " -> " + std::to_string(sa->filament));
+        }
     });
 }
 
