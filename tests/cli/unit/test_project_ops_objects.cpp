@@ -37,7 +37,7 @@ TEST_CASE("add_object_to_plate: missing STL -> file_not_found",
         s, first_plate(s), "Z:/no/such/file.stl", "", -1, nullptr, 1, nullptr);
     REQUIRE_FALSE(r.ok);
     REQUIRE(r.error_code == "file_not_found");
-    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::file_not_found));
 }
 
 TEST_CASE("add_object_to_plate: unknown plate -> unknown_reference",

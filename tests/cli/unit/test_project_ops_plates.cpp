@@ -21,7 +21,7 @@ TEST_CASE("add_plate: empty name -> usage_error", "[unit][plates]") {
     auto r = bambu_cli::add_plate(s, "");
     REQUIRE_FALSE(r.ok);
     REQUIRE(r.error_code == "usage_error");
-    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::usage_error));
 }
 
 TEST_CASE("add_plate: duplicate name -> duplicate_name", "[unit][plates]") {
@@ -31,7 +31,7 @@ TEST_CASE("add_plate: duplicate name -> duplicate_name", "[unit][plates]") {
     auto r = bambu_cli::add_plate(s, "Plate-2");
     REQUIRE_FALSE(r.ok);
     REQUIRE(r.error_code == "duplicate_name");
-    REQUIRE(r.exit_code == 5);
+    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::duplicate_name));
 }
 
 TEST_CASE("remove_plate: removes named plate and compacts indices",
@@ -53,7 +53,7 @@ TEST_CASE("remove_plate: name not found -> unknown_reference",
     auto r = bambu_cli::remove_plate(s, "Missing");
     REQUIRE_FALSE(r.ok);
     REQUIRE(r.error_code == "unknown_reference");
-    REQUIRE(r.exit_code == 6);
+    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::unknown_reference));
 }
 
 TEST_CASE("rename_plate: name updated, index unchanged", "[unit][plates]") {

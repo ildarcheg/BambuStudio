@@ -40,7 +40,7 @@ TEST_CASE("config_set: unknown key -> bad_config", "[unit][config]") {
     auto r = bambu_cli::config_set(s, "", "no_such_key_xyz", "1");
     REQUIRE_FALSE(r.ok);
     REQUIRE(r.error_code == "bad_config");
-    REQUIRE(r.exit_code == 4);
+    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::bad_config));
 }
 
 TEST_CASE("config_set: different_settings_to_system is rejected (system-managed)",
