@@ -1,5 +1,6 @@
 #pragma once
 
+#include "exit_codes.hpp"
 #include "project_state.hpp"
 
 #include <string>

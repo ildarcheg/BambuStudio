@@ -1,3 +1,4 @@
+#include "../exit_codes.hpp"
 #include "../io.hpp"
 #include "../json_output.hpp"
 #include "../project_ops.hpp"
@@ -103,7 +104,7 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
             if (find_object_by_name(state, la->object_name) < 0) {
                 emit_error(mode, "unknown_reference",
                            "object '" + la->object_name + "' not found");
-                std::exit(6);
+                std::exit(to_int(ExitCode::unknown_reference));
             }
         }
 

@@ -1,3 +1,4 @@
+#include "../exit_codes.hpp"
 #include "../io.hpp"
 #include "../invariant_guard.hpp"
 #include "../json_output.hpp"
@@ -61,7 +62,7 @@ void register_project_subcommands(CLI::App& app, OutputMode* mode_out) {
                 emit_error(mode, "invariant_violation",
                            "guard check '" + pre.failed_check +
                            "' failed (template): " + pre.failure_detail);
-                std::exit(8);
+                std::exit(to_int(ExitCode::invariant_violation));
             }
         }
 

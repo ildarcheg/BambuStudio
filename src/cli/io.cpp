@@ -68,7 +68,7 @@ static void rebuild_objects_and_instances(Slic3r::PlateDataPtrs& plates,
 IoResult load_project(const std::string& path, ProjectState& state) {
     IoResult r;
     if (!fs::exists(path)) {
-        r.exit_code = 2; r.error_code = "file_not_found";
+        r.exit_code = to_int(ExitCode::file_not_found); r.error_code = "file_not_found";
         r.error_message = "project file not found: " + path;
         return r;
     }
@@ -83,7 +83,7 @@ IoResult load_project(const std::string& path, ProjectState& state) {
         /*project*/ nullptr, /*plate_id*/ 0,
         /*color_group_map*/ nullptr, /*volume_color_data*/ nullptr);
     if (!ok) {
-        r.exit_code = 3; r.error_code = "parse_failure";
+        r.exit_code = to_int(ExitCode::parse_failure); r.error_code = "parse_failure";
         r.error_message = "load_bbs_3mf returned false for: " + path;
         return r;
     }
@@ -137,7 +137,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
     bool ok = Slic3r::store_bbs_3mf(sp);
     if (!ok) {
         fs::remove(tmp_path);
-        r.exit_code = 7; r.error_code = "invalid_state";
+        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = "store_bbs_3mf returned false for: " + tmp_path;
         return r;
     }
@@ -146,7 +146,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
     GuardResult gr = run_guard(tmp_path, state);
     if (!gr.ok) {
         fs::remove(tmp_path);
-        r.exit_code = 8; r.error_code = "invariant_violation";
+        r.exit_code = to_int(ExitCode::invariant_violation); r.error_code = "invariant_violation";
         r.error_message = "guard check '" + gr.failed_check + "' failed: " + gr.failure_detail;
         return r;
     }
@@ -157,7 +157,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         fs::rename(tmp_path, out_path);
     } catch (const std::exception& e) {
         fs::remove(tmp_path);
-        r.exit_code = 7; r.error_code = "invalid_state";
+        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = std::string("rename failed: ") + e.what();
         return r;
     }
@@ -169,7 +169,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
 IoResult atomic_copy(const std::string& src, const std::string& dst) {
     IoResult r;
     if (!fs::exists(src)) {
-        r.exit_code = 2; r.error_code = "file_not_found";
+        r.exit_code = to_int(ExitCode::file_not_found); r.error_code = "file_not_found";
         r.error_message = "template not found: " + src;
         return r;
     }
@@ -181,7 +181,7 @@ IoResult atomic_copy(const std::string& src, const std::string& dst) {
         fs::rename(tmp, dst);
     } catch (const std::exception& e) {
         fs::remove(tmp);
-        r.exit_code = 7; r.error_code = "invalid_state";
+        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = std::string("atomic_copy failed: ") + e.what();
         return r;
     }

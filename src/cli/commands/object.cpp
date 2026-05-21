@@ -1,3 +1,4 @@
+#include "../exit_codes.hpp"
 #include "../io.hpp"
 #include "../json_output.hpp"
 #include "../project_ops.hpp"
@@ -76,21 +77,21 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
             tf.has_translate = true;
             if (!parse_triple(a->translate, tf.tx, tf.ty, tf.tz, 0.0)) {
                 emit_error(mode, "usage_error", "bad --translate: " + a->translate);
-                std::exit(1);
+                std::exit(to_int(ExitCode::usage_error));
             }
         }
         if (!a->rotate.empty()) {
             tf.has_rotate = true;
             if (!parse_triple(a->rotate, tf.rx, tf.ry, tf.rz, 0.0)) {
                 emit_error(mode, "usage_error", "bad --rotate: " + a->rotate);
-                std::exit(1);
+                std::exit(to_int(ExitCode::usage_error));
             }
         }
         if (!a->scale.empty()) {
             tf.has_scale = true;
             if (!parse_triple(a->scale, tf.sx, tf.sy, tf.sz, 1.0)) {
                 emit_error(mode, "usage_error", "bad --scale: " + a->scale);
-                std::exit(1);
+                std::exit(to_int(ExitCode::usage_error));
             }
         }
         const ManualTransform* tf_ptr = (tf.has_translate || tf.has_rotate || tf.has_scale)
