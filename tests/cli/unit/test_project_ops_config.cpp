@@ -141,3 +141,88 @@ TEST_CASE("config_list --object: returns empty for unknown object",
     auto entries = bambu_cli::config_list(s, "ghost", /*changed_only=*/false);
     REQUIRE(entries.empty());
 }
+
+TEST_CASE("config_set: filament-tab key lands in slot 1..fc (not slot 0)",
+          "[unit][config][m1_routing]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    // filament_max_volumetric_speed is a filament-tab key in
+    // Preset::filament_options() (verify via grep
+    // src/libslic3r/Preset.cpp filament_options).
+    REQUIRE(bambu_cli::config_set(
+        s, "", "filament_max_volumetric_speed", "12").ok);
+
+    const auto* opt = s.project_config.option("different_settings_to_system");
+    REQUIRE(opt != nullptr);
+    const auto* vs =
+        dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt);
+    REQUIRE(vs != nullptr);
+
+    // Determine filament_count from the loaded fixture.
+    const auto* fs_opt = s.project_config.option("filament_settings_id");
+    const auto* fs_vs =
+        dynamic_cast<const Slic3r::ConfigOptionStrings*>(fs_opt);
+    REQUIRE(fs_vs != nullptr);
+    const size_t fc = fs_vs->values.size();
+    REQUIRE(fc >= 1);
+
+    // Slot layout: 0=process, 1=printer, 2..fc+1=per-filament.
+    REQUIRE(vs->values.size() >= fc + 2);
+    REQUIRE(vs->values[0].find("filament_max_volumetric_speed") == std::string::npos);
+    REQUIRE(vs->values[1].find("filament_max_volumetric_speed") == std::string::npos);
+    for (size_t i = 0; i < fc; ++i) {
+        REQUIRE(vs->values[2 + i].find("filament_max_volumetric_speed") != std::string::npos);
+    }
+}
+
+TEST_CASE("config_set: printer-tab key lands in slot 1",
+          "[unit][config][m1_routing]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    // printable_height is in Preset::printer_options() at
+    // src/libslic3r/Preset.cpp:1150. Use a numeric printer-tab key
+    // rather than printer_settings_id (the latter is in skipped_in_dirty
+    // at Preset.cpp:3108 and is intentionally not dirty-tracked).
+    REQUIRE(bambu_cli::config_set(
+        s, "", "printable_height", "300").ok);
+
+    const auto* opt = s.project_config.option("different_settings_to_system");
+    const auto* vs =
+        dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt);
+    REQUIRE(vs != nullptr);
+
+    const auto* fs_opt = s.project_config.option("filament_settings_id");
+    const auto* fs_vs =
+        dynamic_cast<const Slic3r::ConfigOptionStrings*>(fs_opt);
+    const size_t fc = fs_vs->values.size();
+
+    // Slot layout (matches OrcaSlicer/src/cli/project_ops.cpp:420-427 comment):
+    //   slot 0       = process-tab dirty keys
+    //   slot 1       = printer-tab dirty keys
+    //   slots 2..fc+1 = per-filament dirty keys (fc total)
+    REQUIRE(vs->values.size() >= fc + 2);
+    REQUIRE(vs->values[0].find("printable_height") == std::string::npos);
+    REQUIRE(vs->values[1].find("printable_height") != std::string::npos);
+    for (size_t i = 0; i < fc; ++i) {
+        REQUIRE(vs->values[2 + i].find("printable_height") == std::string::npos);
+    }
+}
+
+TEST_CASE("config_unset: filament-tab key is removed from all filament slots",
+          "[unit][config][m1_routing]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::config_set(
+        s, "", "filament_max_volumetric_speed", "12").ok);
+    REQUIRE(bambu_cli::config_unset(
+        s, "", "filament_max_volumetric_speed").ok);
+
+    const auto* opt = s.project_config.option("different_settings_to_system");
+    if (!opt) return;   // option may have been erased entirely; that's fine
+    const auto* vs =
+        dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt);
+    if (!vs) return;
+    for (const auto& slot : vs->values) {
+        REQUIRE(slot.find("filament_max_volumetric_speed") == std::string::npos);
+    }
+}
