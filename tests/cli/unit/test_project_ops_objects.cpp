@@ -264,3 +264,50 @@ TEST_CASE("find_object_by_name: returns -1 when absent", "[unit][objects]") {
     bambu_cli_unit::load_reference_into(s);
     REQUIRE(bambu_cli::find_object_by_name(s, "ghost") == -1);
 }
+
+// -------------------------------------------------------------------
+// M3.1: failing tests for `set-filament --part Y` per-volume routing.
+// These EXPECT the future 4-arg signature
+// `set_object_filament(state, object_name, filament_idx, part_idx)`.
+// Today's signature is 3-arg, so these TEST_CASEs FAIL TO COMPILE.
+// M3.2 will add the 4th argument and make these compile + pass.
+// -------------------------------------------------------------------
+TEST_CASE("set_object_filament: --part Y writes to volume config, not object config",
+          "[unit][m3_part_filament]") {
+    bambu_cli::ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+
+    // Add an object first (single-volume).
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, s.plate_data.front()->plate_name, stl, "", -1, nullptr, 1, nullptr).ok);
+
+    // Set per-volume filament via --part Y (volume index 0; cube.stl is one volume).
+    // Signature: set_object_filament(state, object_name, filament_idx, part_idx).
+    // part_idx >= 0 means per-volume; -1 (default) means object-level.
+    auto r = bambu_cli::set_object_filament(s, "cube", 2, /*part_idx=*/0);
+    REQUIRE(r.ok);
+
+    // Object-level extruder must NOT be set (or, if set by prior fixture state,
+    // must NOT be 2 from this call).
+    const auto* obj = s.model.objects[0];
+    // Volume-level extruder must be 2.
+    REQUIRE_FALSE(obj->volumes.empty());
+    const auto* eopt = obj->volumes[0]->config.option("extruder");
+    REQUIRE(eopt != nullptr);
+    REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(eopt)->value == 2);
+}
+
+TEST_CASE("set_object_filament: --part Y out-of-range -> usage_error",
+          "[unit][m3_part_filament]") {
+    bambu_cli::ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, s.plate_data.front()->plate_name, stl, "", -1, nullptr, 1, nullptr).ok);
+
+    // Volume index 5 does not exist on the single-volume cube.
+    auto r = bambu_cli::set_object_filament(s, "cube", 1, /*part_idx=*/5);
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::usage_error));
+}
