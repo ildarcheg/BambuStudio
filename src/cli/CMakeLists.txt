@@ -39,6 +39,7 @@ add_executable(bambu-cli ${BAMBU_CLI_SOURCES})
 target_include_directories(bambu-cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/CLI11
+    ${CMAKE_SOURCE_DIR}/src         # for <nlohmann/json.hpp> (vendored at src/nlohmann/json.hpp)
 )
 
 # IMPORTED-target Debug/Release mapping insurance (build_environment memory).
