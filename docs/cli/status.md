@@ -163,8 +163,8 @@ Update this file with each milestone landing.
 - **(P1) `ExitCode` enum class** — `d6d4d49c5` + fixup `d5792c2ac`.
   `src/cli/exit_codes.hpp`.
 - **(P2) Unit-test layer** — `037abb19b` + fixup `8a4e015dc`.
-  `tests/cli/unit/` adds ~45 unit tests over project_ops.
-- **(P2) This status doc** — created.
-- **(P3) Sister-project fixtures removed** — see commit log for SHA.
+  `tests/cli/unit/` adds 39 unit tests over project_ops.
+- **(P2) This status doc** — `9ae766993`.
+- **(P3) Sister-project fixtures removed** — `46acbee50`.
   `tests/cli/fixtures/local/temp_project_for_orca_slicer.3mf` +
   `tests/cli/fixtures/local/stls/box_with_text.stl` deleted.
