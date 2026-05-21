@@ -70,3 +70,31 @@ TEST_CASE("project init: corrupted template (missing plate_1_small.png) -> exit 
 
     fs::remove(corrupted);
 }
+
+TEST_CASE("save_project: re-init over existing destination round-trips",
+          "[e2e][m2_baksave]") {
+    const fs::path out = fs::temp_directory_path() / "m2_baksave.3mf";
+    fs::remove(out);
+    fs::remove(out.string() + ".bak");
+    const std::string ref = canonical_committed_3mf();
+    REQUIRE(fs::exists(ref));
+
+    auto r1 = spawn_cli({"project", "init", out.string(), "--template", ref});
+    INFO("stderr1: " << r1.stderr_text);
+    INFO("stdout1: " << r1.stdout_text);
+    REQUIRE(r1.exit_code == 0);
+    REQUIRE(fs::exists(out));
+
+    // Re-init over the existing destination -- exercises the .bak swap path.
+    auto r2 = spawn_cli({"project", "init", out.string(), "--template", ref});
+    INFO("stderr2: " << r2.stderr_text);
+    INFO("stdout2: " << r2.stdout_text);
+    REQUIRE(r2.exit_code == 0);
+    REQUIRE(fs::exists(out));
+    REQUIRE_FALSE(fs::exists(out.string() + ".bak"));   // cleaned up
+
+    // Validate that the produced archive still passes archive invariants.
+    bambu_cli_test::run_all_basic(out.string());
+
+    fs::remove(out);
+}
