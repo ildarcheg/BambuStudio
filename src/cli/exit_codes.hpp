@@ -3,7 +3,7 @@
 namespace bambu_cli {
 
 // Documented exit codes (spec §3). Stored as int in IoResult/OpResult and
-// passed to std::exit via static_cast<int>(ExitCode::name).
+// passed to std::exit() and stored in IoResult/OpResult via to_int(ExitCode::name).
 enum class ExitCode : int {
     ok                  = 0,
     usage_error         = 1,
