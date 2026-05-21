@@ -106,12 +106,21 @@ OpResult remove_object(ProjectState& state, const std::string& object_name);
 // Group-by-name semantics (same N-object logic as remove_object above).
 // Also applies the Bug B retrofit guard: if any volume's source.input_file is
 // empty, it is populated from obj->input_file before setting the extruder key.
+//
+// <part_idx>: -1 (default) = object-level (write to ModelObject::config);
+//             >=0          = per-volume (write to ModelVolume::config of
+//                            obj->volumes[part_idx] on every matching object).
+//             For per-volume mode, each matching object must have at least
+//             (part_idx + 1) volumes; otherwise exit 1 (usage_error).
+//
 // Error codes:
 //   exit 6 (unknown_reference) — no matching object found
 //   exit 1 (usage_error)       — filament_idx out of range [1, slot_count]
+//                                OR part_idx out of range for an object
 OpResult set_object_filament(ProjectState& state,
                              const std::string& object_name,
-                             int filament_idx);
+                             int filament_idx,
+                             int part_idx = -1);
 
 // ---- M7: config set / unset / list ----------------------------------------
 

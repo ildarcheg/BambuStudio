@@ -296,6 +296,14 @@ TEST_CASE("set_object_filament: --part Y writes to volume config, not object con
     const auto* eopt = obj->volumes[0]->config.option("extruder");
     REQUIRE(eopt != nullptr);
     REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(eopt)->value == 2);
+
+    // The test name promises "NOT object config" — assert the object-level
+    // extruder did NOT get the per-volume value (it may be unset, or set to
+    // something else from a prior fixture state, but it must not be 2).
+    const auto* obj_eopt = obj->config.option("extruder");
+    if (obj_eopt != nullptr) {
+        REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(obj_eopt)->value != 2);
+    }
 }
 
 TEST_CASE("set_object_filament: --part Y out-of-range -> usage_error",

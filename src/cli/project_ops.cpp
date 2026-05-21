@@ -588,7 +588,8 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
 
 OpResult set_object_filament(ProjectState& state,
                              const std::string& object_name,
-                             int filament_idx) {
+                             int filament_idx,
+                             int part_idx) {
     OpResult r;
 
     // Collect ALL matching indices (group-by-name semantics).
@@ -604,7 +605,7 @@ OpResult set_object_filament(ProjectState& state,
         return r;
     }
 
-    // Validate filament index BEFORE any mutation (nothing to roll back if we fail here).
+    // Validate filament index BEFORE any mutation.
     const Slic3r::ConfigOption* slots_opt =
         state.project_config.option("filament_settings_id");
     size_t slot_count = 0;
@@ -617,24 +618,52 @@ OpResult set_object_filament(ProjectState& state,
         return r;
     }
 
+    // If per-volume mode requested, pre-validate that EVERY matching object
+    // has at least (part_idx + 1) volumes. We validate before any mutation
+    // so partial failure does not leave half-updated state.
+    if (part_idx >= 0) {
+        for (int idx : matches) {
+            const auto* obj = state.model.objects[idx];
+            if (!obj) continue;
+            if (part_idx >= static_cast<int>(obj->volumes.size())) {
+                r.exit_code = to_int(ExitCode::usage_error); r.error_code = "usage_error";
+                r.error_message = "part index " + std::to_string(part_idx) +
+                                  " out of range for object '" + object_name +
+                                  "' (has " + std::to_string(obj->volumes.size()) + " volume(s))";
+                return r;
+            }
+        }
+    }
+
     // Apply to every matching ModelObject.
     for (int idx : matches) {
         auto* obj = state.model.objects[idx];
         if (!obj) continue;
 
-        // Bug B retrofit guard: if any volume's source.input_file is empty,
-        // populate it from obj->input_file BEFORE setting the extruder key.
-        // This prevents the Bug B failure mode (extruder set + missing source_file
-        // → BambuStudio silently drops the object on load).
-        for (auto* vol : obj->volumes) {
-            if (vol && vol->source.input_file.empty()) {
-                vol->source.input_file = obj->input_file;
-                vol->source.object_idx = 0;
-                vol->source.volume_idx = 0;
+        // Bug B retrofit guard (object-level mode only; per-volume mode
+        // operates on a specific volume that is assumed already stamped).
+        if (part_idx < 0) {
+            for (auto* vol : obj->volumes) {
+                if (vol && vol->source.input_file.empty()) {
+                    vol->source.input_file = obj->input_file;
+                    vol->source.object_idx = 0;
+                    vol->source.volume_idx = 0;
+                }
+            }
+            obj->config.set("extruder", filament_idx);
+        } else {
+            // Per-volume mode: stamp source on the target volume only if
+            // empty, then write extruder to its config.
+            auto* vol = obj->volumes[part_idx];
+            if (vol) {
+                if (vol->source.input_file.empty()) {
+                    vol->source.input_file = obj->input_file;
+                    vol->source.object_idx = 0;
+                    vol->source.volume_idx = part_idx;
+                }
+                vol->config.set("extruder", filament_idx);
             }
         }
-
-        obj->config.set("extruder", filament_idx);
     }
 
     r.ok = true;
