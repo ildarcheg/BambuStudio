@@ -5,6 +5,7 @@
 #include "libslic3r/Model.hpp"
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Preset.hpp"
 #include "libslic3r/Config.hpp"
 
 #include <algorithm>
@@ -653,70 +654,96 @@ static size_t get_filament_count(const Slic3r::DynamicPrintConfig& cfg) {
     return 1;
 }
 
-// Add <key> to position 0 of different_settings_to_system (process-tab slot).
-// The array is sized to filament_count + 2:
-//   position 0             — process-tab modified keys (comma-free, semicolon-separated)
-//   positions 1..fc        — per-filament modified keys (one per filament slot)
-//   position fc+1          — printer-tab modified keys
-//
-// NOTE: Filament-tab and printer-tab routing is a follow-up task; this hotfix
-// always writes to position 0 (process tab), which covers the vast majority of
-// project-level settings (line_width, layer_height, infill_density, etc.).
-//
-// Within each slot the keys are stored as a flat semicolon-separated string
-// (no quoting, no escape needed — config key names contain only [a-z_] chars).
+// Decide which slot a config key belongs to in different_settings_to_system.
+// Slot layout matches the OrcaSlicer comment block at project_ops.cpp:420-427:
+//   slot 0        -> process-tab key (Preset::print_options)
+//   slot 1        -> printer-tab key (Preset::printer_options)
+//   slots 2..fc+1 -> per-filament dirty keys (Preset::filament_options, broadcast via -2 sentinel)
+//   slot 0        -> unknown (default: process tab — GUI ignores irrelevant entries)
+// Ported from OrcaSlicer/src/cli/project_ops.cpp:434-451.
+static int classify_key_slot(const std::string& key) {
+    using namespace Slic3r;
+    {
+        const auto& opts = Preset::print_options();
+        if (std::find(opts.begin(), opts.end(), key) != opts.end()) return 0;
+    }
+    {
+        const auto& opts = Preset::printer_options();
+        if (std::find(opts.begin(), opts.end(), key) != opts.end()) return 1;
+    }
+    {
+        const auto& opts = Preset::filament_options();
+        if (std::find(opts.begin(), opts.end(), key) != opts.end()) return -2; // sentinel: broadcast to all filament slots
+    }
+    return 0;
+}
+
+// Add <key> to the named slot of different_settings_to_system. Keys are
+// stored as a flat semicolon-separated string within each slot.
+static void add_key_to_slot(Slic3r::ConfigOptionStrings* diff, int slot, const std::string& key) {
+    std::vector<std::string> keys;
+    if (!diff->values[slot].empty())
+        Slic3r::unescape_strings_cstyle(diff->values[slot], keys);
+    if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
+        keys.push_back(key);
+        diff->values[slot] = boost::algorithm::join(keys, ";");
+    }
+}
+
+static void remove_key_from_slot(Slic3r::ConfigOptionStrings* diff, int slot, const std::string& key) {
+    std::vector<std::string> keys;
+    if (!diff->values[slot].empty())
+        Slic3r::unescape_strings_cstyle(diff->values[slot], keys);
+    auto it = std::find(keys.begin(), keys.end(), key);
+    if (it == keys.end()) return;
+    keys.erase(it);
+    diff->values[slot] = boost::algorithm::join(keys, ";");
+}
+
+// Mark a project-level config key as overriding the system preset. Routes
+// to slot 0 (process) / slot 1 (printer) / slots 2..2+fc-1 (filament,
+// broadcast across all filament slots) based on classify_key_slot.
+// Replaces the prior slot-0-only add_to_different_settings_to_system.
 static void add_to_different_settings_to_system(Slic3r::DynamicPrintConfig& cfg,
                                                 const std::string& key) {
     size_t fc = get_filament_count(cfg);
     size_t target_size = fc + 2;
 
-    // Get-or-create the option.
     auto* opt = cfg.option<Slic3r::ConfigOptionStrings>("different_settings_to_system",
                                                          /*create_if_missing=*/true);
-    if (!opt) return;   // should never happen
-
-    // Resize, filling new slots with empty strings. Don't truncate non-empty entries.
+    if (!opt) return;
     if (opt->values.size() < target_size)
         opt->values.resize(target_size, std::string());
 
-    // Position 0 is the process-tab slot. Parse into individual key names.
-    const std::string& slot0 = opt->values[0];
-    std::vector<std::string> keys;
-    if (!slot0.empty()) {
-        // Keys are plain identifiers separated by ';'. unescape_strings_cstyle
-        // handles the standard Slic3r ';'-delimited format.
-        Slic3r::unescape_strings_cstyle(slot0, keys);
-    }
-
-    // Deduplicate: only add if not already present.
-    if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
-        keys.push_back(key);
-        // Re-serialize as ';'-separated string (no quoting needed for key names).
-        opt->values[0] = boost::algorithm::join(keys, ";");
+    int slot = classify_key_slot(key);
+    if (slot == -2) {
+        // Filament key: broadcast to every filament slot (2..2+fc-1).
+        for (size_t i = 0; i < fc; ++i)
+            add_key_to_slot(opt, static_cast<int>(2 + i), key);
+    } else {
+        // Process key (slot 0), printer key (slot 1), or unknown (default 0).
+        add_key_to_slot(opt, slot, key);
     }
 }
 
-// Remove <key> from position 0 of different_settings_to_system (process-tab slot).
-// If position 0 becomes empty after removal, leave the option present with the
-// empty string at position 0 — BS may rely on the option's presence to detect
-// that the project was saved with preset awareness.
+// Symmetric to add_to_different_settings_to_system. Routes unset based on
+// the same classifier so the unset cleans the slot the set actually wrote to.
 static void remove_from_different_settings_to_system(Slic3r::DynamicPrintConfig& cfg,
                                                      const std::string& key) {
     auto* opt = cfg.option<Slic3r::ConfigOptionStrings>("different_settings_to_system",
                                                          /*create_if_missing=*/false);
     if (!opt || opt->values.empty()) return;
 
-    // Parse position 0.
-    std::vector<std::string> keys;
-    if (!opt->values[0].empty())
-        Slic3r::unescape_strings_cstyle(opt->values[0], keys);
+    size_t fc = get_filament_count(cfg);
+    if (opt->values.size() < fc + 2) return;
 
-    auto it = std::find(keys.begin(), keys.end(), key);
-    if (it == keys.end()) return;   // key not present — nothing to do
-
-    keys.erase(it);
-    // Re-serialize (empty → empty string, which is fine).
-    opt->values[0] = boost::algorithm::join(keys, ";");
+    int slot = classify_key_slot(key);
+    if (slot == -2) {
+        for (size_t i = 0; i < fc; ++i)
+            remove_key_from_slot(opt, static_cast<int>(2 + i), key);
+    } else {
+        remove_key_from_slot(opt, slot, key);
+    }
 }
 
 int find_object_by_name(const ProjectState& state, const std::string& name) {
