@@ -168,3 +168,54 @@ Update this file with each milestone landing.
 - **(P3) Sister-project fixtures removed** — `46acbee50`.
   `tests/cli/fixtures/local/temp_project_for_orca_slicer.3mf` +
   `tests/cli/fixtures/local/stls/box_with_text.stl` deleted.
+
+## Sibling-parity follow-ups (2026-05-21)
+
+Cross-project review against OrcaSlicer's `src/cli/` (see
+`docs/superpowers/plans/2026-05-21-cli-sibling-parity.md`). Four
+correctness/safety/feature/hygiene gaps closed; four larger items
+(Phase 10 info/profile/aux, split-to-parts, merge-parts, plate
+thumbnail passthrough) de-scoped to dedicated follow-up plans.
+
+- **(P1 — item 2) Classifier-aware `different_settings_to_system` routing**
+  — `6b3afe863` (failing tests) + `944f151ca` (classifier port). Adds
+  `classify_key_slot` dispatch via `Preset::{print,printer,filament}_options()`;
+  filament keys broadcast to slots 2..fc+1, printer keys to slot 1, process
+  and unknown keys remain at slot 0. Fixes silent-ignore of filament-tab
+  and printer-tab project overrides at slice time.
+- **(P1 — item 3) `.bak`-swap atomic save** — `ef3abc574` (pin test) +
+  `ab4fbf3e6` (rewrite). `save_project` now does `rename(dst -> .bak)`,
+  `rename(tmp -> dst)`, `remove(.bak)`; destination is never absent
+  during the swap.
+- **(P2 — item 4) `object set-filament --part Y`** — `8a0b943ef`
+  (failing tests) + `a4dced83f` (op signature) + `dca182330` (CLI flag).
+  Per-volume extruder assignment; pre-validates part index across all
+  matching objects before any mutation. Unblocks merge-parts workflows.
+- **(P3 — item 9) `nlohmann::json` migration** — `e7188d901` (include
+  path precursor) + `c692c0ff5` (emitter + 4 command rewrites). Replaces
+  hand-rolled `json_escape` + `std::ostringstream` with `nlohmann::json`
+  object construction; envelope keys now alphabetically ordered. Fixes
+  a silent-compile bug in `inspect.cpp` where `data` was emitted as a
+  JSON string instead of a JSON object.
+
+### De-scoped to follow-up plans (require their own plans before execution)
+
+- **(P1 — item 5) Phase 10: `project info` / `project profile` / `project aux`** —
+  ~398 LoC port from `OrcaSlicer/src/cli/project_tab_ops.{cpp,hpp}`.
+  Needs Bambu-side verification of whether `store_bbs_3mf` reads
+  `metadata_items["ProfileTitle"]` (Orca confirmed; Bambu unknown).
+- **(P2 — item 6) `object split-to-parts`** — ~50 LoC delegation to
+  `ModelVolume::split(remap_paint=true)` + `stamp_source_if_missing`
+  Bug-C defense. Reference: `OrcaSlicer/src/cli/project_ops.cpp:651-699`.
+- **(P2 — item 7) `object merge-parts`** — ~280 LoC with 8-step
+  validation precedence + bake-in transform + single-volume
+  serialization shim. Reference: `OrcaSlicer/src/cli/project_ops.cpp:701-984`.
+  Critical: lowest-existing-index wins both placement AND attribution;
+  use `add_volume(mesh, /*modify_to_center_geometry=*/false)`; never
+  `ModelObject::merge_volumes` (3 documented bugs).
+- **(P3 — item 8) Plate thumbnail passthrough from source** — ~250 LoC
+  across 4 helpers. Requires `ProjectState::source_path` field addition.
+  Reference: `OrcaSlicer/src/cli/io.cpp:200-342`.
+- **(P3 — item 1, verification only)** Re-verified `bbs_3mf.cpp:4806`
+  obj_inst_map.emplace still collapses duplicate object_id; no fork
+  divergence. N-`ModelObject`s-per-`--count` model stands.
