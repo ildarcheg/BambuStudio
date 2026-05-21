@@ -374,9 +374,10 @@ override it with per-feature values during slicing. For precise control, use
 the specific per-feature key names. The full list is visible in BS's process
 settings panel.
 
-### M3/M6: world stride placement for multi-plate scenarios
+### M3/M6: cross-plate stride is bed-width-aware (no manual override needed)
 
-When `--count N` places N objects across multiple plates using the grid-stride
-algorithm, each copy is offset by the bed width (256 mm for X1C). If your print
-profile uses a different bed size, adjust `--translate` manually instead of
-relying on `--count` for cross-plate placement.
+`--count N` placements on plate K use a bed-aware stride
+`stride_xy = bed_extent * 1.2` per plate (matching BBS
+`PartPlateList::LOGICAL_PART_PLATE_GAP = 1/5`). On a 256 mm X1C bed plate 2
+sits at world X = 307.2 mm; on a 400 mm bed plate 2 sits at 480 mm.
+Tested in `tests/cli/test_plate_stride.cpp`.

@@ -156,8 +156,8 @@ static void get_bed_aabb(const Slic3r::PlateData* pd,
 // For our CLI purposes we only need stride (plate 1 → origin (0,0);
 // plate 2 → (stride_x, 0), etc.). Since we don't know total_plate_count
 // we use a fixed large-enough column count (e.g., ceil(sqrt(plate_index+1))).
-static Slic3r::Vec3d plate_world_origin(int plate_index,
-                                        double bed_width, double bed_height) {
+Slic3r::Vec3d plate_world_origin(int plate_index,
+                                 double bed_width, double bed_height) {
     // BBS PartPlateList::LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2
     static const double LOGICAL_PART_PLATE_GAP = 0.2;
     double stride_x = bed_width  * (1.0 + LOGICAL_PART_PLATE_GAP);

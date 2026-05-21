@@ -15,6 +15,7 @@ set(BAMBU_CLI_TEST_SOURCES
     test_plate_remove_rename.cpp
     test_object_remove_set_filament.cpp
     test_json_and_exit_codes.cpp
+    test_plate_stride.cpp
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
@@ -22,6 +23,11 @@ add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
     # libslic3r.lib(LogSink.obj) references these symbols; the stubs satisfy
     # them without pulling in curl or openssl-ssl.
     ${CMAKE_SOURCE_DIR}/src/cli/stubs_for_libslic3r.cpp
+    # nanosvg_impl.cpp provides nsvgParse/nsvgParseFromFile/nsvgDelete which
+    # libslic3r.lib(NSVGUtils.obj) requires (pulled in transitively by project_ops.cpp
+    # -> bbs_3mf.hpp -> NSVGUtils.hpp).
+    ${CMAKE_SOURCE_DIR}/src/cli/nanosvg_impl.cpp
+    ${CMAKE_SOURCE_DIR}/src/cli/project_ops.cpp
 )
 target_link_libraries(cli_tests PRIVATE test_common libslic3r OpenSSL::Crypto)
 if(WIN32)
