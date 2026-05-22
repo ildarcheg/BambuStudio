@@ -24,8 +24,11 @@ int main(int argc, char** argv) {
     app.add_flag_callback("--json", [&]() { mode = bambu_cli::OutputMode::Json; },
                           "emit machine-readable JSON Shape A");
 
+    // --verbose is accepted for forward-compat but is intentionally a no-op:
+    // wiring it to stage callbacks requires invasive plumbing (>30 LOC across
+    // 5 register functions). Hidden from --help; kept parsed so scripts don't break.
     bool verbose = false;
-    app.add_flag("--verbose", verbose, "verbose diagnostic logging");
+    app.add_flag("--verbose", verbose, "")->group("");
 
     bambu_cli::register_project_subcommands(app, &mode);
     bambu_cli::register_inspect_subcommands(app, &mode);

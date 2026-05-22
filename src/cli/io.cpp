@@ -284,7 +284,8 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
     const std::string bak = out_path + ".bak";
     try {
         if (fs::exists(out_path)) {
-            fs::remove(bak);   // clean any stale leftover
+            boost::system::error_code stale_ec;
+            fs::remove(bak, stale_ec);   // best-effort; locked .bak must not abort the save
             fs::rename(out_path, bak);
         }
         try {
