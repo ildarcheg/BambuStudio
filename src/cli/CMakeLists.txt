@@ -31,6 +31,7 @@ set(BAMBU_CLI_CORE_SOURCES
     json_output.cpp
     project_ops.cpp
     project_tab_ops.cpp
+    png_placeholder.cpp
     commands/project.cpp
     commands/project_tab.cpp
     commands/inspect.cpp
