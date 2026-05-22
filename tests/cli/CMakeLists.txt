@@ -19,6 +19,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_json_and_exit_codes.cpp
     e2e/test_project_info.cpp
     e2e/test_project_profile.cpp
+    e2e/test_project_aux.cpp
     # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
@@ -27,6 +28,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_plate_stride.cpp
     unit/test_project_info_ops.cpp
     unit/test_project_profile_ops.cpp
+    unit/test_project_aux_ops.cpp
     # roundtrip/ is a placeholder for future phases.
 )
 

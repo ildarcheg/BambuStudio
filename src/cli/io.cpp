@@ -27,8 +27,14 @@ ProjectState::~ProjectState() {
 }
 
 // --- LoadStrategy combinator (enum class — operators are defined in bbs_3mf.hpp)
+// LoadAuxiliary is included so auxiliary files (cover images, aux add/remove/list
+// entries) are extracted to the model's aux temp dir on every load. Without this,
+// aux files would only exist in the current process's temp dir and be lost between
+// CLI invocations. Existing operations (plate/object/config) are unaffected:
+// the aux temp dir is empty for projects without aux files.
 static Slic3r::LoadStrategy load_model_and_config() {
-    return Slic3r::LoadStrategy::LoadModel | Slic3r::LoadStrategy::LoadConfig;
+    return Slic3r::LoadStrategy::LoadModel | Slic3r::LoadStrategy::LoadConfig
+           | Slic3r::LoadStrategy::LoadAuxiliary;
 }
 
 // --- G2 rebuild: PlateData::objects_and_instances from model instances ----
