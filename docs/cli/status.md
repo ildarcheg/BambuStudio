@@ -219,3 +219,67 @@ thumbnail passthrough) de-scoped to dedicated follow-up plans.
 - **(P3 — item 1, verification only)** Re-verified `bbs_3mf.cpp:4806`
   obj_inst_map.emplace still collapses duplicate object_id; no fork
   divergence. N-`ModelObject`s-per-`--count` model stands.
+
+## Phase A — Architecture refactor (2026-05-21)
+
+Sibling-parity architecture pass. Six atomic commits, each verified
+green at the commit boundary. No new CLI surface introduced; user-
+visible behavior of `bambu-cli` is unchanged (verified by
+`bambu-cli --help` output diff and by the unchanged
+`test_json_and_exit_codes.cpp` envelope + exit-code matrix).
+
+Final test count: **92 cases / 445 assertions / 0 failures** (89 baseline
++ 3 new group-by-name unit tests added in A.6). The 25-assertion drop
+from the baseline 447 in A.3 reflects the typed-exception refactor
+replacing 2- and 3-assertion `OpResult.ok/error_code/exit_code` triples
+with single `REQUIRE_THROWS_AS` calls.
+
+- **(A.1) Test directory restructure** — `244f76d1b`. Moved 11 e2e test
+  files from flat `tests/cli/` into `tests/cli/e2e/`, moved the pure
+  unit test `test_plate_stride.cpp` into `tests/cli/unit/`, and added
+  `tests/cli/roundtrip/` as an empty placeholder for future phases.
+  Shared helpers (`cli_tests_main.cpp`, `test_helpers.{cpp,hpp}`,
+  `archive_invariants.{cpp,hpp}`) stay at the `tests/cli/` root.
+- **(A.2) Static lib split** — `49dcebae9`. Introduced
+  `bambu_cli_core` STATIC library in `src/cli/CMakeLists.txt`
+  containing every CLI translation unit except `main.cpp`. The
+  `bambu-cli` executable and the `cli_tests` test binary now link
+  the same lib instead of compiling the sources twice. Sibling parity
+  with OrcaSlicer's `orca_cli_core`.
+- **(A.3) Typed exceptions in project_ops** — `f00ca1bf3`. Added
+  `src/cli/exceptions.hpp` with five typed exceptions
+  (`FileNotFoundError`, `BadConfigError`, `DuplicateNameError`,
+  `InvariantViolation`, `PlacementFailure`) plus the Bambu stdlib
+  conventions (`std::invalid_argument` → exit 1,
+  `std::out_of_range` → exit 6, `std::runtime_error` → exit 3). Every
+  error site in `project_ops.cpp` now throws instead of populating
+  `OpResult`. Unit tests updated to `REQUIRE_THROWS_AS`. The
+  transitional helper `src/cli/commands/op_dispatch.hpp` lived for
+  one phase, then was removed in A.4.
+- **(A.4) MutationExceptionMap + run_mutation envelope** —
+  `ac21aac05`. Added
+  `src/cli/commands/mutation_runner.hpp` with
+  `MutationExceptionMap` (typeindex → `{exit_code, error_code}`
+  override map) and `template <Mutator> run_mutation(mode, in_path,
+  out_path, mut, overrides={})`. Folds the
+  `load_project → mutate → save_project → emit_ok` scaffolding plus
+  the exception-to-ExitCode dispatch into a single envelope. Every
+  mutating callback in `commands/{plate,object,config}.cpp` now uses
+  `run_mutation`; no mutating callback calls `std::exit` directly.
+  Read-only callbacks (list verbs, inspect) and `project init`
+  (clone-and-verify) retain their own flows.
+- **(A.5) emit_list_response template** — `96465bcfc`. Added
+  `emit_list_response<Row, ToJson, ToLine>` to
+  `src/cli/json_output.hpp`. Refactored `plate list`, `object list`,
+  and `config list` to delegate the JSON-array-vs-text-line branching
+  to the template. `inspect` (single-record emit) keeps its own
+  inline path.
+- **(A.6) Group-by-name on `config set/unset/list --object`** —
+  `474478f9b`. Replaced the first-match `find_object_by_name` lookup
+  in `config_set`, `config_unset`, and `config_list` with a walk over
+  every matching `ModelObject`. Sibling parity with OrcaSlicer commit
+  `c2ddf51d87`. Added three unit tests under `[unit][config][group]`
+  exercising set / unset / list across `--count 2` clones.
+
+**Delta over `src/cli` + `tests/cli`**: 26 files changed, +660 / -455
+(2 new headers: `exceptions.hpp`, `commands/mutation_runner.hpp`).
