@@ -971,6 +971,10 @@ std::string merge_object_parts(ProjectState& state,
                                const std::string& name,
                                const MergePartsParams& p)
 {
+    // Step a: --parts must not be empty.
+    if (p.parts.empty())
+        throw std::invalid_argument("merge-parts: --parts must not be empty");
+
     // Step b: First-match on --name.
     Slic3r::ModelObject* obj = nullptr;
     for (auto* o : state.model.objects) {

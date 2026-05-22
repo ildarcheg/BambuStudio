@@ -284,10 +284,10 @@ TEST_CASE("config_unset: filament-tab key is removed from all filament slots",
         s, "", "filament_max_volumetric_speed").ok);
 
     const auto* opt = s.project_config.option("different_settings_to_system");
-    if (!opt) return;   // option may have been erased entirely; that's fine
+    REQUIRE(opt != nullptr);   // config_unset must not erase the tracking key entirely
     const auto* vs =
         dynamic_cast<const Slic3r::ConfigOptionStrings*>(opt);
-    if (!vs) return;
+    REQUIRE(vs != nullptr);
     for (const auto& slot : vs->values) {
         REQUIRE(slot.find("filament_max_volumetric_speed") == std::string::npos);
     }
