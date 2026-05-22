@@ -207,6 +207,73 @@ TEST_CASE("config_set: printer-tab key lands in slot 1",
     }
 }
 
+// -------------------------------------------------------------------
+// Phase A.6: group-by-name on config set/unset/list --object NAME.
+// Sibling parity with OrcaSlicer commit c2ddf51d87. Before A.6, each of
+// these verbs operated only on the first match; the --count N clones
+// past the first were silently skipped. After A.6, every matching
+// ModelObject is included.
+// -------------------------------------------------------------------
+
+TEST_CASE("config_set --object: applies to ALL matching clones (group-by-name)",
+          "[unit][config][group]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, first_plate(s), stl, "", -1, nullptr, /*count=*/2, nullptr).ok);
+    REQUIRE(s.model.objects.size() == 2);
+
+    REQUIRE(bambu_cli::config_set(s, "cube", "line_width", "0.7").ok);
+
+    // BOTH clones must have line_width=0.7 on their per-object config.
+    for (auto* obj : s.model.objects) {
+        REQUIRE(obj->config.has("line_width"));
+        REQUIRE(obj->config.opt_serialize("line_width") == "0.7");
+    }
+}
+
+TEST_CASE("config_unset --object: removes from ALL matching clones (group-by-name)",
+          "[unit][config][group]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, first_plate(s), stl, "", -1, nullptr, /*count=*/2, nullptr).ok);
+    REQUIRE(bambu_cli::config_set(s, "cube", "line_width", "0.7").ok);
+
+    REQUIRE(bambu_cli::config_unset(s, "cube", "line_width").ok);
+
+    for (auto* obj : s.model.objects)
+        REQUIRE_FALSE(obj->config.has("line_width"));
+}
+
+TEST_CASE("config_list --object: returns union across all matching clones (group-by-name)",
+          "[unit][config][group]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, first_plate(s), stl, "", -1, nullptr, /*count=*/2, nullptr).ok);
+
+    // Set DIFFERENT keys on each clone directly (bypass config_set's
+    // group semantics) so the two clones have divergent config; list must
+    // return the UNION.
+    Slic3r::ConfigSubstitutionContext subst{
+        Slic3r::ForwardCompatibilitySubstitutionRule::Disable};
+    s.model.objects[0]->config.set_deserialize("line_width", "0.5", subst);
+    s.model.objects[1]->config.set_deserialize("wall_loops", "3",   subst);
+
+    auto entries = bambu_cli::config_list(s, "cube", /*changed_only=*/false);
+    bool found_line_width = false, found_wall_loops = false;
+    for (const auto& e : entries) {
+        if (e.key == "line_width") { found_line_width = true; REQUIRE(e.value == "0.5"); }
+        if (e.key == "wall_loops") { found_wall_loops = true; REQUIRE(e.value == "3"); }
+    }
+    REQUIRE(found_line_width);
+    REQUIRE(found_wall_loops);
+}
+
 TEST_CASE("config_unset: filament-tab key is removed from all filament slots",
           "[unit][config][m1_routing]") {
     ProjectState s;

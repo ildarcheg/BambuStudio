@@ -771,15 +771,25 @@ OpResult config_set(ProjectState& state,
         // need this tracking. Filament-tab and printer-tab routing is a follow-up.
         add_to_different_settings_to_system(state.project_config, key);
     } else {
-        int idx = find_object_by_name(state, object_name);
-        if (idx < 0)
+        // Group-by-name: apply the set to EVERY ModelObject whose name matches
+        // (multiple matches happen when `--count N` produced N clones).
+        // Sibling parity: OrcaSlicer commit c2ddf51d87 semantics.
+        std::vector<int> matches;
+        for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+            const auto* obj = state.model.objects[i];
+            if (obj && obj->name == object_name)
+                matches.push_back(i);
+        }
+        if (matches.empty())
             throw std::out_of_range("object '" + object_name + "' not found");
-        // ModelObject::config is ModelConfigObject which inherits ModelConfig.
-        // ModelConfig::set_deserialize delegates to m_data.set_deserialize + touch().
-        try {
-            state.model.objects[idx]->config.set_deserialize(key, value, subst_ctx);
-        } catch (const std::exception& ex) {
-            throw BadConfigError("invalid value for '" + key + "': " + ex.what());
+        for (int idx : matches) {
+            // ModelObject::config is ModelConfigObject which inherits ModelConfig.
+            // ModelConfig::set_deserialize delegates to m_data.set_deserialize + touch().
+            try {
+                state.model.objects[idx]->config.set_deserialize(key, value, subst_ctx);
+            } catch (const std::exception& ex) {
+                throw BadConfigError("invalid value for '" + key + "': " + ex.what());
+            }
         }
     }
 
@@ -804,12 +814,27 @@ OpResult config_unset(ProjectState& state,
         // treats this key as a user override.
         remove_from_different_settings_to_system(state.project_config, key);
     } else {
-        int idx = find_object_by_name(state, object_name);
-        if (idx < 0)
+        // Group-by-name: erase the key from EVERY matching ModelObject that
+        // has it set. Throw unknown_reference if no match exists, or if a
+        // match exists but no match has the key. Sibling parity: OrcaSlicer
+        // commit c2ddf51d87 semantics.
+        std::vector<int> matches;
+        for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+            const auto* obj = state.model.objects[i];
+            if (obj && obj->name == object_name)
+                matches.push_back(i);
+        }
+        if (matches.empty())
             throw std::out_of_range("object '" + object_name + "' not found");
-        if (!state.model.objects[idx]->config.has(key))
+        int erased = 0;
+        for (int idx : matches) {
+            if (state.model.objects[idx]->config.has(key)) {
+                state.model.objects[idx]->config.erase(key);
+                ++erased;
+            }
+        }
+        if (erased == 0)
             throw std::out_of_range("key '" + key + "' not set on target");
-        state.model.objects[idx]->config.erase(key);
     }
 
     r.ok = true;
@@ -821,56 +846,75 @@ std::vector<ConfigEntry> config_list(const ProjectState& state,
                                      bool only_changed) {
     std::vector<ConfigEntry> out;
 
-    // Get a const reference to the underlying DynamicPrintConfig.
-    const Slic3r::DynamicPrintConfig* cfg_ptr = nullptr;
-    // For per-object we need the ModelConfig's underlying data via get().
-    const Slic3r::ModelConfig* model_cfg_ptr = nullptr;
-
     if (object_name.empty()) {
-        cfg_ptr = &state.project_config;
-    } else {
-        // Cast away to find object — state is const here so use const_cast trick.
-        // Actually state is passed as const& so we use const_cast for model.
-        for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
-            const auto* obj = state.model.objects[i];
-            if (obj && obj->name == object_name) {
-                model_cfg_ptr = &obj->config;
-                cfg_ptr       = &obj->config.get();
+        // Project-level: single DynamicPrintConfig.
+        const Slic3r::DynamicPrintConfig& cfg = state.project_config;
+        std::vector<std::string> keys_to_emit;
+        if (only_changed) {
+            std::vector<std::string> all_keys = cfg.keys();
+            if (!all_keys.empty()) {
+                std::unique_ptr<Slic3r::DynamicPrintConfig> defaults(
+                    Slic3r::DynamicPrintConfig::new_from_defaults_keys(all_keys));
+                if (defaults) {
+                    keys_to_emit = cfg.diff(*defaults);
+                } else {
+                    keys_to_emit = std::move(all_keys);
+                }
+            }
+        } else {
+            keys_to_emit = cfg.keys();
+        }
+        for (const auto& k : keys_to_emit) {
+            ConfigEntry e; e.key = k; e.value = cfg.opt_serialize(k);
+            out.push_back(std::move(e));
+        }
+        return out;
+    }
+
+    // Per-object: group-by-name.
+    // Walk ALL ModelObjects whose name matches, build the UNION of their
+    // explicitly-set keys (or per-match diff against defaults when
+    // only_changed), and take each key's value from the first match that
+    // has it. Sibling parity: OrcaSlicer commit c2ddf51d87 semantics.
+    std::vector<const Slic3r::DynamicPrintConfig*> match_cfgs;
+    for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+        const auto* obj = state.model.objects[i];
+        if (obj && obj->name == object_name)
+            match_cfgs.push_back(&obj->config.get());
+    }
+    if (match_cfgs.empty()) return out;   // no match -> empty list
+
+    // Build the union of keys to emit, sorted by std::set for deterministic
+    // output regardless of which match contributed which key first.
+    std::set<std::string> union_keys;
+    for (const auto* cfg : match_cfgs) {
+        std::vector<std::string> match_keys = cfg->keys();
+        if (only_changed && !match_keys.empty()) {
+            std::unique_ptr<Slic3r::DynamicPrintConfig> defaults(
+                Slic3r::DynamicPrintConfig::new_from_defaults_keys(match_keys));
+            if (defaults) {
+                for (const auto& k : cfg->diff(*defaults))
+                    union_keys.insert(k);
+            } else {
+                for (const auto& k : match_keys)
+                    union_keys.insert(k);
+            }
+        } else {
+            for (const auto& k : match_keys)
+                union_keys.insert(k);
+        }
+    }
+
+    // For each key, emit the value from the first match that has it.
+    for (const auto& k : union_keys) {
+        for (const auto* cfg : match_cfgs) {
+            if (cfg->has(k)) {
+                ConfigEntry e; e.key = k; e.value = cfg->opt_serialize(k);
+                out.push_back(std::move(e));
                 break;
             }
         }
-        if (!cfg_ptr) return out;  // object not found — return empty
     }
-
-    std::vector<std::string> keys_to_emit;
-
-    if (only_changed) {
-        // Build a defaults config for the same set of keys, then diff.
-        // new_from_defaults_keys is a static method on DynamicPrintConfig.
-        // It returns a heap-allocated DynamicPrintConfig* that we must delete.
-        std::vector<std::string> all_keys = cfg_ptr->keys();
-        if (!all_keys.empty()) {
-            std::unique_ptr<Slic3r::DynamicPrintConfig> defaults(
-                Slic3r::DynamicPrintConfig::new_from_defaults_keys(all_keys));
-            if (defaults) {
-                // diff() returns keys whose value in *cfg_ptr differs from *defaults.
-                keys_to_emit = cfg_ptr->diff(*defaults);
-            } else {
-                // Fallback: emit all keys if defaults couldn't be built.
-                keys_to_emit = all_keys;
-            }
-        }
-    } else {
-        keys_to_emit = cfg_ptr->keys();
-    }
-
-    for (const auto& k : keys_to_emit) {
-        ConfigEntry e;
-        e.key   = k;
-        e.value = cfg_ptr->opt_serialize(k);
-        out.push_back(std::move(e));
-    }
-
     return out;
 }
 
