@@ -4,6 +4,7 @@
 #include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
+#include "op_dispatch.hpp"
 
 #include <memory>
 #include <sstream>
@@ -49,8 +50,9 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
         IoResult lr = load_project(sa->in_path, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
-        OpResult op = config_set(state, sa->object_name, sa->key, sa->value);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() {
+            return config_set(state, sa->object_name, sa->key, sa->value);
+        });
 
         const std::string& out = sa->out_path.empty() ? sa->in_path : sa->out_path;
         IoResult sr = save_project(state, out);
@@ -74,8 +76,9 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
         IoResult lr = load_project(ua->in_path, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
-        OpResult op = config_unset(state, ua->object_name, ua->key);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() {
+            return config_unset(state, ua->object_name, ua->key);
+        });
 
         const std::string& out = ua->out_path.empty() ? ua->in_path : ua->out_path;
         IoResult sr = save_project(state, out);

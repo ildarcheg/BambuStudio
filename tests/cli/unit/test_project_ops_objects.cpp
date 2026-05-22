@@ -1,8 +1,11 @@
 #include <catch2/catch.hpp>
 #include "unit_helpers.hpp"
 #include "project_ops.hpp"
+#include "exceptions.hpp"
 
 #include <libslic3r/Model.hpp>
+
+#include <stdexcept>
 
 using bambu_cli::ProjectState;
 
@@ -33,11 +36,10 @@ TEST_CASE("add_object_to_plate: missing STL -> file_not_found",
           "[unit][objects]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::add_object_to_plate(
-        s, first_plate(s), "Z:/no/such/file.stl", "", -1, nullptr, 1, nullptr);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "file_not_found");
-    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::file_not_found));
+    REQUIRE_THROWS_AS(
+        bambu_cli::add_object_to_plate(
+            s, first_plate(s), "Z:/no/such/file.stl", "", -1, nullptr, 1, nullptr),
+        bambu_cli::FileNotFoundError);
 }
 
 TEST_CASE("add_object_to_plate: unknown plate -> unknown_reference",
@@ -45,10 +47,10 @@ TEST_CASE("add_object_to_plate: unknown plate -> unknown_reference",
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
-    auto r = bambu_cli::add_object_to_plate(
-        s, "NoSuchPlate", stl, "", -1, nullptr, 1, nullptr);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
+    REQUIRE_THROWS_AS(
+        bambu_cli::add_object_to_plate(
+            s, "NoSuchPlate", stl, "", -1, nullptr, 1, nullptr),
+        std::out_of_range);
 }
 
 TEST_CASE("add_object_to_plate: filament out of range rolls back",
@@ -57,10 +59,10 @@ TEST_CASE("add_object_to_plate: filament out of range rolls back",
     bambu_cli_unit::load_reference_into(s);
     const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
     size_t pre = s.model.objects.size();
-    auto r = bambu_cli::add_object_to_plate(
-        s, first_plate(s), stl, "", /*filament=*/99, nullptr, 1, nullptr);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "usage_error");
+    REQUIRE_THROWS_AS(
+        bambu_cli::add_object_to_plate(
+            s, first_plate(s), stl, "", /*filament=*/99, nullptr, 1, nullptr),
+        std::invalid_argument);
     REQUIRE(s.model.objects.size() == pre);   // rollback
 }
 
@@ -69,10 +71,10 @@ TEST_CASE("add_object_to_plate: filament=0 -> usage_error",
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
-    auto r = bambu_cli::add_object_to_plate(
-        s, first_plate(s), stl, "", /*filament=*/0, nullptr, 1, nullptr);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "usage_error");
+    REQUIRE_THROWS_AS(
+        bambu_cli::add_object_to_plate(
+            s, first_plate(s), stl, "", /*filament=*/0, nullptr, 1, nullptr),
+        std::invalid_argument);
 }
 
 TEST_CASE("add_object_to_plate: --count 3 produces 3 ModelObjects",
@@ -105,10 +107,10 @@ TEST_CASE("add_object_to_plate: manual translate off-bed -> placement_failure",
     bambu_cli::ManualTransform tf;
     tf.has_translate = true;
     tf.tx = 9999.0; tf.ty = 0.0; tf.tz = 0.0;
-    auto r = bambu_cli::add_object_to_plate(
-        s, first_plate(s), stl, "", -1, &tf, 1, nullptr);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "placement_failure");
+    REQUIRE_THROWS_AS(
+        bambu_cli::add_object_to_plate(
+            s, first_plate(s), stl, "", -1, &tf, 1, nullptr),
+        bambu_cli::PlacementFailure);
     REQUIRE(s.model.objects.empty());   // rolled back
 }
 
@@ -128,9 +130,7 @@ TEST_CASE("remove_object: name not found -> unknown_reference",
           "[unit][objects]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::remove_object(s, "no_such");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
+    REQUIRE_THROWS_AS(bambu_cli::remove_object(s, "no_such"), std::out_of_range);
 }
 
 TEST_CASE("set_object_filament: stamps extruder on all copies (group semantics)",
@@ -171,18 +171,16 @@ TEST_CASE("set_object_filament: out-of-range -> usage_error",
     const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
     REQUIRE(bambu_cli::add_object_to_plate(
         s, first_plate(s), stl, "", -1, nullptr, 1, nullptr).ok);
-    auto r = bambu_cli::set_object_filament(s, "cube", 99);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "usage_error");
+    REQUIRE_THROWS_AS(bambu_cli::set_object_filament(s, "cube", 99),
+                      std::invalid_argument);
 }
 
 TEST_CASE("set_object_filament: object not found -> unknown_reference",
           "[unit][objects]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::set_object_filament(s, "missing", 1);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
+    REQUIRE_THROWS_AS(bambu_cli::set_object_filament(s, "missing", 1),
+                      std::out_of_range);
 }
 
 TEST_CASE("list_objects: returns plate-attributed entries with extruders",
@@ -315,7 +313,6 @@ TEST_CASE("set_object_filament: --part Y out-of-range -> usage_error",
         s, s.plate_data.front()->plate_name, stl, "", -1, nullptr, 1, nullptr).ok);
 
     // Volume index 5 does not exist on the single-volume cube.
-    auto r = bambu_cli::set_object_filament(s, "cube", 1, /*part_idx=*/5);
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::usage_error));
+    REQUIRE_THROWS_AS(bambu_cli::set_object_filament(s, "cube", 1, /*part_idx=*/5),
+                      std::invalid_argument);
 }

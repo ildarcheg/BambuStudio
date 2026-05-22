@@ -1,6 +1,9 @@
 #include <catch2/catch.hpp>
 #include "unit_helpers.hpp"
 #include "project_ops.hpp"
+#include "exceptions.hpp"
+
+#include <stdexcept>
 
 using bambu_cli::ProjectState;
 
@@ -18,20 +21,15 @@ TEST_CASE("add_plate: appends to plate_data with monotonic index",
 TEST_CASE("add_plate: empty name -> usage_error", "[unit][plates]") {
     ProjectState s;
     bambu_cli_unit::make_minimal_state(s, 1);
-    auto r = bambu_cli::add_plate(s, "");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "usage_error");
-    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::usage_error));
+    REQUIRE_THROWS_AS(bambu_cli::add_plate(s, ""), std::invalid_argument);
 }
 
 TEST_CASE("add_plate: duplicate name -> duplicate_name", "[unit][plates]") {
     ProjectState s;
     bambu_cli_unit::make_minimal_state(s, 1);
     REQUIRE(bambu_cli::add_plate(s, "Plate-2").ok);
-    auto r = bambu_cli::add_plate(s, "Plate-2");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "duplicate_name");
-    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::duplicate_name));
+    REQUIRE_THROWS_AS(bambu_cli::add_plate(s, "Plate-2"),
+                      bambu_cli::DuplicateNameError);
 }
 
 TEST_CASE("remove_plate: removes named plate and compacts indices",
@@ -50,10 +48,7 @@ TEST_CASE("remove_plate: name not found -> unknown_reference",
           "[unit][plates]") {
     ProjectState s;
     bambu_cli_unit::make_minimal_state(s, 1);
-    auto r = bambu_cli::remove_plate(s, "Missing");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
-    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::unknown_reference));
+    REQUIRE_THROWS_AS(bambu_cli::remove_plate(s, "Missing"), std::out_of_range);
 }
 
 TEST_CASE("rename_plate: name updated, index unchanged", "[unit][plates]") {
@@ -67,26 +62,23 @@ TEST_CASE("rename_plate: name updated, index unchanged", "[unit][plates]") {
 TEST_CASE("rename_plate: empty target -> usage_error", "[unit][plates]") {
     ProjectState s;
     bambu_cli_unit::make_minimal_state(s, 2);
-    auto r = bambu_cli::rename_plate(s, "Plate-2", "");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "usage_error");
+    REQUIRE_THROWS_AS(bambu_cli::rename_plate(s, "Plate-2", ""),
+                      std::invalid_argument);
 }
 
 TEST_CASE("rename_plate: collision -> duplicate_name", "[unit][plates]") {
     ProjectState s;
     bambu_cli_unit::make_minimal_state(s, 2);
-    auto r = bambu_cli::rename_plate(s, "Plate-2", "Plate-1");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "duplicate_name");
+    REQUIRE_THROWS_AS(bambu_cli::rename_plate(s, "Plate-2", "Plate-1"),
+                      bambu_cli::DuplicateNameError);
 }
 
 TEST_CASE("rename_plate: source not found -> unknown_reference",
           "[unit][plates]") {
     ProjectState s;
     bambu_cli_unit::make_minimal_state(s, 1);
-    auto r = bambu_cli::rename_plate(s, "Missing", "NewName");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
+    REQUIRE_THROWS_AS(bambu_cli::rename_plate(s, "Missing", "NewName"),
+                      std::out_of_range);
 }
 
 TEST_CASE("list_plate_names: returns names in plate_data order",

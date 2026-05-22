@@ -4,6 +4,7 @@
 #include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
+#include "op_dispatch.hpp"
 
 #include <memory>
 #include <sstream>
@@ -98,9 +99,10 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
                                         ? &tf : nullptr;
 
         ObjectRef ref;
-        OpResult op = add_object_to_plate(state, a->plate, a->stl, a->name,
-                                          a->filament, tf_ptr, a->count, &ref);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() {
+            return add_object_to_plate(state, a->plate, a->stl, a->name,
+                                       a->filament, tf_ptr, a->count, &ref);
+        });
 
         const std::string& out = a->out_path.empty() ? a->in_path : a->out_path;
         IoResult sr = save_project(state, out);
@@ -155,8 +157,7 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
         ProjectState state;
         IoResult lr = load_project(ora->in, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-        OpResult op = remove_object(state, ora->name);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() { return remove_object(state, ora->name); });
         const std::string& out = ora->out.empty() ? ora->in : ora->out;
         IoResult sr = save_project(state, out);
         if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
@@ -179,8 +180,9 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
         ProjectState state;
         IoResult lr = load_project(sa->in, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-        OpResult op = set_object_filament(state, sa->name, sa->filament, sa->part);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() {
+            return set_object_filament(state, sa->name, sa->filament, sa->part);
+        });
         const std::string& out = sa->out.empty() ? sa->in : sa->out;
         IoResult sr = save_project(state, out);
         if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }

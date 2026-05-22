@@ -3,6 +3,7 @@
 #include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
+#include "op_dispatch.hpp"
 
 #include <memory>
 #include <sstream>
@@ -47,8 +48,7 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
         IoResult lr = load_project(a->in_path, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
-        OpResult op = add_plate(state, a->name);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() { return add_plate(state, a->name); });
 
         const std::string& out = a->out_path.empty() ? a->in_path : a->out_path;
         IoResult sr = save_project(state, out);
@@ -69,8 +69,7 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
         IoResult lr = load_project(rm->in_path, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
-        OpResult op = remove_plate(state, rm->name);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() { return remove_plate(state, rm->name); });
 
         const std::string& out = rm->out_path.empty() ? rm->in_path : rm->out_path;
         IoResult sr = save_project(state, out);
@@ -92,8 +91,7 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
         IoResult lr = load_project(rn->in_path, state);
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
-        OpResult op = rename_plate(state, rn->from, rn->to);
-        if (!op.ok) { emit_error(mode, op.error_code, op.error_message); std::exit(op.exit_code); }
+        run_op_or_exit(mode, [&]() { return rename_plate(state, rn->from, rn->to); });
 
         const std::string& out = rn->out_path.empty() ? rn->in_path : rn->out_path;
         IoResult sr = save_project(state, out);

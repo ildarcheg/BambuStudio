@@ -1,8 +1,11 @@
 #include <catch2/catch.hpp>
 #include "unit_helpers.hpp"
 #include "project_ops.hpp"
+#include "exceptions.hpp"
 
 #include <libslic3r/PrintConfig.hpp>
+
+#include <stdexcept>
 
 using bambu_cli::ProjectState;
 
@@ -37,19 +40,17 @@ TEST_CASE("config_set project-level: registers in different_settings_to_system",
 TEST_CASE("config_set: unknown key -> bad_config", "[unit][config]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::config_set(s, "", "no_such_key_xyz", "1");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "bad_config");
-    REQUIRE(r.exit_code == bambu_cli::to_int(bambu_cli::ExitCode::bad_config));
+    REQUIRE_THROWS_AS(bambu_cli::config_set(s, "", "no_such_key_xyz", "1"),
+                      bambu_cli::BadConfigError);
 }
 
 TEST_CASE("config_set: different_settings_to_system is rejected (system-managed)",
           "[unit][config]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::config_set(s, "", "different_settings_to_system", "x");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "bad_config");
+    REQUIRE_THROWS_AS(
+        bambu_cli::config_set(s, "", "different_settings_to_system", "x"),
+        bambu_cli::BadConfigError);
 }
 
 TEST_CASE("config_set --object: stores on per-object config",
@@ -69,9 +70,9 @@ TEST_CASE("config_set --object: object not found -> unknown_reference",
           "[unit][config]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::config_set(s, "missing", "line_width", "0.4");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
+    REQUIRE_THROWS_AS(
+        bambu_cli::config_set(s, "missing", "line_width", "0.4"),
+        std::out_of_range);
 }
 
 TEST_CASE("config_unset project-level: clears key and untracks it",
@@ -101,17 +102,15 @@ TEST_CASE("config_unset: key not set -> unknown_reference", "[unit][config]") {
     // the unknown_reference branch.
     REQUIRE(bambu_cli::config_set(s, "", "line_width", "0.5").ok);
     REQUIRE(bambu_cli::config_unset(s, "", "line_width").ok);
-    auto r = bambu_cli::config_unset(s, "", "line_width");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "unknown_reference");
+    REQUIRE_THROWS_AS(bambu_cli::config_unset(s, "", "line_width"),
+                      std::out_of_range);
 }
 
 TEST_CASE("config_unset: unknown key -> bad_config", "[unit][config]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    auto r = bambu_cli::config_unset(s, "", "no_such_key_xyz");
-    REQUIRE_FALSE(r.ok);
-    REQUIRE(r.error_code == "bad_config");
+    REQUIRE_THROWS_AS(bambu_cli::config_unset(s, "", "no_such_key_xyz"),
+                      bambu_cli::BadConfigError);
 }
 
 TEST_CASE("config_list: returns all keys when not changed-only",

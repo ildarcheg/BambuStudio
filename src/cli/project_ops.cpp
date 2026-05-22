@@ -1,5 +1,7 @@
 #include "project_ops.hpp"
 
+#include "exceptions.hpp"
+
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Model.hpp"
@@ -29,17 +31,11 @@ std::vector<std::string> list_plate_names(const ProjectState& state) {
 
 OpResult add_plate(ProjectState& state, const std::string& name) {
     OpResult r;
-    if (name.empty()) {
-        r.exit_code = to_int(ExitCode::usage_error); r.error_code = "usage_error";
-        r.error_message = "plate name must be non-empty";
-        return r;
-    }
+    if (name.empty())
+        throw std::invalid_argument("plate name must be non-empty");
     for (const auto* p : state.plate_data) {
-        if (p && p->plate_name == name) {
-            r.exit_code = to_int(ExitCode::duplicate_name); r.error_code = "duplicate_name";
-            r.error_message = "plate '" + name + "' already exists";
-            return r;
-        }
+        if (p && p->plate_name == name)
+            throw DuplicateNameError("plate '" + name + "' already exists");
     }
     auto* plate = new Slic3r::PlateData();
     // plate_index is 1-based, monotonically increasing.
@@ -65,19 +61,13 @@ static int find_plate_by_name(const ProjectState& state, const std::string& name
 OpResult remove_plate(ProjectState& state, const std::string& name) {
     OpResult r;
     int idx = find_plate_by_name(state, name);
-    if (idx < 0) {
-        r.exit_code = to_int(ExitCode::unknown_reference); r.error_code = "unknown_reference";
-        r.error_message = "plate '" + name + "' not found";
-        return r;
-    }
+    if (idx < 0)
+        throw std::out_of_range("plate '" + name + "' not found");
     Slic3r::PlateData* pd = state.plate_data[static_cast<size_t>(idx)];
-    if (!pd->objects_and_instances.empty()) {
-        r.exit_code = to_int(ExitCode::unknown_reference); r.error_code = "unknown_reference";
-        r.error_message = "plate '" + name + "' is not empty (" +
-                          std::to_string(pd->objects_and_instances.size()) +
-                          " instance(s)); remove objects first";
-        return r;
-    }
+    if (!pd->objects_and_instances.empty())
+        throw std::out_of_range("plate '" + name + "' is not empty (" +
+                                std::to_string(pd->objects_and_instances.size()) +
+                                " instance(s)); remove objects first");
     delete pd;
     state.plate_data.erase(state.plate_data.begin() + idx);
     // Re-assign plate_index values to ensure contiguous 0-based sequence.
@@ -96,24 +86,15 @@ OpResult rename_plate(ProjectState& state,
                       const std::string& from,
                       const std::string& to) {
     OpResult r;
-    if (to.empty()) {
-        r.exit_code = to_int(ExitCode::usage_error); r.error_code = "usage_error";
-        r.error_message = "new plate name must be non-empty";
-        return r;
-    }
+    if (to.empty())
+        throw std::invalid_argument("new plate name must be non-empty");
     for (const auto* p : state.plate_data) {
-        if (p && p->plate_name == to) {
-            r.exit_code = to_int(ExitCode::duplicate_name); r.error_code = "duplicate_name";
-            r.error_message = "plate '" + to + "' already exists";
-            return r;
-        }
+        if (p && p->plate_name == to)
+            throw DuplicateNameError("plate '" + to + "' already exists");
     }
     int idx = find_plate_by_name(state, from);
-    if (idx < 0) {
-        r.exit_code = to_int(ExitCode::unknown_reference); r.error_code = "unknown_reference";
-        r.error_message = "plate '" + from + "' not found";
-        return r;
-    }
+    if (idx < 0)
+        throw std::out_of_range("plate '" + from + "' not found");
     state.plate_data[static_cast<size_t>(idx)]->plate_name = to;
     r.ok = true;
     return r;
@@ -191,17 +172,11 @@ OpResult add_object_to_plate(ProjectState& state,
                              int count,
                              ObjectRef* out_ref) {
     OpResult r;
-    if (!boost::filesystem::exists(stl_path)) {
-        r.exit_code = to_int(ExitCode::file_not_found); r.error_code = "file_not_found";
-        r.error_message = "stl not found: " + stl_path;
-        return r;
-    }
+    if (!boost::filesystem::exists(stl_path))
+        throw FileNotFoundError("stl not found: " + stl_path);
     int plate_idx = find_plate_by_name(state, plate_name);
-    if (plate_idx < 0) {
-        r.exit_code = to_int(ExitCode::unknown_reference); r.error_code = "unknown_reference";
-        r.error_message = "plate '" + plate_name + "' not found";
-        return r;
-    }
+    if (plate_idx < 0)
+        throw std::out_of_range("plate '" + plate_name + "' not found");
 
     // Count clamp: 0 or negative → 1.
     const int copies = std::max(1, count);
@@ -213,16 +188,10 @@ OpResult add_object_to_plate(ProjectState& state,
     //    obj_inst_map entry (map key collision otherwise drops all but one entry on
     //    reload, breaking list_objects and objects_and_instances reconstruction).
     Slic3r::Model scratch_model;
-    if (!Slic3r::load_stl(stl_path.c_str(), &scratch_model)) {
-        r.exit_code = to_int(ExitCode::parse_failure); r.error_code = "parse_failure";
-        r.error_message = "load_stl returned false for: " + stl_path;
-        return r;
-    }
-    if (scratch_model.objects.empty() || scratch_model.objects[0]->volumes.empty()) {
-        r.exit_code = to_int(ExitCode::parse_failure); r.error_code = "parse_failure";
-        r.error_message = "stl loaded with no geometry: " + stl_path;
-        return r;
-    }
+    if (!Slic3r::load_stl(stl_path.c_str(), &scratch_model))
+        throw std::runtime_error("load_stl returned false for: " + stl_path);
+    if (scratch_model.objects.empty() || scratch_model.objects[0]->volumes.empty())
+        throw std::runtime_error("stl loaded with no geometry: " + stl_path);
 
     // Cache the mesh bbox BEFORE the loop (same mesh for all copies).
     Slic3r::TriangleMesh mesh_cache = scratch_model.objects[0]->volumes[0]->mesh();
@@ -396,15 +365,13 @@ OpResult add_object_to_plate(ProjectState& state,
                         it = pd->obj_inst_map.erase(it);
                     else ++it;
                 }
-                r.exit_code = to_int(ExitCode::placement_failure); r.error_code = "placement_failure";
                 std::ostringstream os;
                 os << "object '" << name << "' bbox ["
                    << bx0 << "," << by0 << "..." << bx1 << "," << by1
                    << "] off-bed (plate '" << plate_name << "' AABB ["
                    << plate_bed_minx << "," << plate_bed_miny
                    << ".." << plate_bed_maxx << "," << plate_bed_maxy << "])";
-                r.error_message = os.str();
-                return r;
+                throw PlacementFailure(os.str());
             }
         }
     }
@@ -431,10 +398,8 @@ OpResult add_object_to_plate(ProjectState& state,
                     it = pd->obj_inst_map.erase(it);
                 else ++it;
             }
-            r.exit_code = to_int(ExitCode::usage_error); r.error_code = "usage_error";
-            r.error_message = "filament " + std::to_string(filament_idx) +
-                              " out of range [1," + std::to_string(slot_count) + "]";
-            return r;
+            throw std::invalid_argument("filament " + std::to_string(filament_idx) +
+                                        " out of range [1," + std::to_string(slot_count) + "]");
         }
         // Apply extruder to every copy (per-ModelObject config).
         for (int ki = 0; ki < copies; ++ki) {
@@ -509,11 +474,8 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
         if (obj && obj->name == object_name)
             to_remove.push_back(i);
     }
-    if (to_remove.empty()) {
-        r.exit_code = to_int(ExitCode::unknown_reference); r.error_code = "unknown_reference";
-        r.error_message = "object '" + object_name + "' not found";
-        return r;
-    }
+    if (to_remove.empty())
+        throw std::out_of_range("object '" + object_name + "' not found");
 
     // Build a lookup set for O(1) membership test (used for objects_and_instances cleanup).
     std::vector<bool> is_removed(state.model.objects.size(), false);
@@ -599,11 +561,8 @@ OpResult set_object_filament(ProjectState& state,
         if (obj && obj->name == object_name)
             matches.push_back(i);
     }
-    if (matches.empty()) {
-        r.exit_code = to_int(ExitCode::unknown_reference); r.error_code = "unknown_reference";
-        r.error_message = "object '" + object_name + "' not found";
-        return r;
-    }
+    if (matches.empty())
+        throw std::out_of_range("object '" + object_name + "' not found");
 
     // Validate filament index BEFORE any mutation.
     const Slic3r::ConfigOption* slots_opt =
@@ -611,12 +570,9 @@ OpResult set_object_filament(ProjectState& state,
     size_t slot_count = 0;
     if (auto* vs = dynamic_cast<const Slic3r::ConfigOptionStrings*>(slots_opt))
         slot_count = vs->values.size();
-    if (filament_idx < 1 || filament_idx > static_cast<int>(slot_count)) {
-        r.exit_code = to_int(ExitCode::usage_error); r.error_code = "usage_error";
-        r.error_message = "filament " + std::to_string(filament_idx) +
-                          " out of range [1," + std::to_string(slot_count) + "]";
-        return r;
-    }
+    if (filament_idx < 1 || filament_idx > static_cast<int>(slot_count))
+        throw std::invalid_argument("filament " + std::to_string(filament_idx) +
+                                    " out of range [1," + std::to_string(slot_count) + "]");
 
     // If per-volume mode requested, pre-validate that EVERY matching object
     // has at least (part_idx + 1) volumes. We validate before any mutation
@@ -625,13 +581,11 @@ OpResult set_object_filament(ProjectState& state,
         for (int idx : matches) {
             const auto* obj = state.model.objects[idx];
             if (!obj) continue;
-            if (part_idx >= static_cast<int>(obj->volumes.size())) {
-                r.exit_code = to_int(ExitCode::usage_error); r.error_code = "usage_error";
-                r.error_message = "part index " + std::to_string(part_idx) +
-                                  " out of range for object '" + object_name +
-                                  "' (has " + std::to_string(obj->volumes.size()) + " volume(s))";
-                return r;
-            }
+            if (part_idx >= static_cast<int>(obj->volumes.size()))
+                throw std::invalid_argument("part index " + std::to_string(part_idx) +
+                                            " out of range for object '" + object_name +
+                                            "' (has " + std::to_string(obj->volumes.size()) +
+                                            " volume(s))");
         }
     }
 
@@ -792,21 +746,14 @@ OpResult config_set(ProjectState& state,
     OpResult r;
 
     // Validate the key against print_config_def.
-    if (!Slic3r::print_config_def.has(key)) {
-        r.exit_code    = to_int(ExitCode::bad_config);
-        r.error_code   = "bad_config";
-        r.error_message = "unknown config key: '" + key + "'";
-        return r;
-    }
+    if (!Slic3r::print_config_def.has(key))
+        throw BadConfigError("unknown config key: '" + key + "'");
 
     // different_settings_to_system is a system-managed key that tracks which
     // keys were user-modified. It must not be set directly by the user.
-    if (key == "different_settings_to_system") {
-        r.exit_code    = to_int(ExitCode::bad_config);
-        r.error_code   = "bad_config";
-        r.error_message = "'different_settings_to_system' is a system-managed key and cannot be set directly";
-        return r;
-    }
+    if (key == "different_settings_to_system")
+        throw BadConfigError("'different_settings_to_system' is a system-managed key "
+                             "and cannot be set directly");
 
     Slic3r::ConfigSubstitutionContext subst_ctx{
         Slic3r::ForwardCompatibilitySubstitutionRule::Disable };
@@ -816,10 +763,7 @@ OpResult config_set(ProjectState& state,
         try {
             state.project_config.set_deserialize(key, value, subst_ctx);
         } catch (const std::exception& ex) {
-            r.exit_code    = to_int(ExitCode::bad_config);
-            r.error_code   = "bad_config";
-            r.error_message = "invalid value for '" + key + "': " + ex.what();
-            return r;
+            throw BadConfigError("invalid value for '" + key + "': " + ex.what());
         }
         // Register this key in different_settings_to_system (position 0, process tab)
         // so that BambuStudio recognizes it as a user override and honors it when
@@ -828,21 +772,14 @@ OpResult config_set(ProjectState& state,
         add_to_different_settings_to_system(state.project_config, key);
     } else {
         int idx = find_object_by_name(state, object_name);
-        if (idx < 0) {
-            r.exit_code    = to_int(ExitCode::unknown_reference);
-            r.error_code   = "unknown_reference";
-            r.error_message = "object '" + object_name + "' not found";
-            return r;
-        }
+        if (idx < 0)
+            throw std::out_of_range("object '" + object_name + "' not found");
         // ModelObject::config is ModelConfigObject which inherits ModelConfig.
         // ModelConfig::set_deserialize delegates to m_data.set_deserialize + touch().
         try {
             state.model.objects[idx]->config.set_deserialize(key, value, subst_ctx);
         } catch (const std::exception& ex) {
-            r.exit_code    = to_int(ExitCode::bad_config);
-            r.error_code   = "bad_config";
-            r.error_message = "invalid value for '" + key + "': " + ex.what();
-            return r;
+            throw BadConfigError("invalid value for '" + key + "': " + ex.what());
         }
     }
 
@@ -856,38 +793,22 @@ OpResult config_unset(ProjectState& state,
     OpResult r;
 
     // Validate the key against print_config_def.
-    if (!Slic3r::print_config_def.has(key)) {
-        r.exit_code    = to_int(ExitCode::bad_config);
-        r.error_code   = "bad_config";
-        r.error_message = "unknown config key: '" + key + "'";
-        return r;
-    }
+    if (!Slic3r::print_config_def.has(key))
+        throw BadConfigError("unknown config key: '" + key + "'");
 
     if (object_name.empty()) {
-        if (!state.project_config.has(key)) {
-            r.exit_code    = to_int(ExitCode::unknown_reference);
-            r.error_code   = "unknown_reference";
-            r.error_message = "key '" + key + "' not set on target";
-            return r;
-        }
+        if (!state.project_config.has(key))
+            throw std::out_of_range("key '" + key + "' not set on target");
         state.project_config.erase(key);
         // Remove from different_settings_to_system tracking so BS no longer
         // treats this key as a user override.
         remove_from_different_settings_to_system(state.project_config, key);
     } else {
         int idx = find_object_by_name(state, object_name);
-        if (idx < 0) {
-            r.exit_code    = to_int(ExitCode::unknown_reference);
-            r.error_code   = "unknown_reference";
-            r.error_message = "object '" + object_name + "' not found";
-            return r;
-        }
-        if (!state.model.objects[idx]->config.has(key)) {
-            r.exit_code    = to_int(ExitCode::unknown_reference);
-            r.error_code   = "unknown_reference";
-            r.error_message = "key '" + key + "' not set on target";
-            return r;
-        }
+        if (idx < 0)
+            throw std::out_of_range("object '" + object_name + "' not found");
+        if (!state.model.objects[idx]->config.has(key))
+            throw std::out_of_range("key '" + key + "' not set on target");
         state.model.objects[idx]->config.erase(key);
     }
 
