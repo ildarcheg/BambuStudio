@@ -113,25 +113,21 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
         std::vector<ListedObject> objs = list_objects(state, l->only_plate);
-        if (mode == OutputMode::Json) {
-            nlohmann::json data;
-            data["object_count"] = objs.size();
-            data["objects"]      = nlohmann::json::array();
-            for (const auto& o : objs) {
-                data["objects"].push_back({
+        emit_list_response<ListedObject>(
+            mode, "object list", "object_count", "objects", objs,
+            [](const ListedObject& o) -> nlohmann::json {
+                return {
                     {"plate",    o.plate_name},
                     {"name",     o.object_name},
                     {"extruder", o.extruder},
-                });
-            }
-            emit_ok(mode, "ok", "object list", data);
-        } else {
-            std::ostringstream m;
-            for (const auto& o : objs)
-                m << "[" << o.plate_name << "] " << o.object_name
+                };
+            },
+            [](std::size_t, const ListedObject& o) {
+                std::ostringstream s;
+                s << "[" << o.plate_name << "] " << o.object_name
                   << " (extruder=" << o.extruder << ")\n";
-            emit_ok(mode, "ok", m.str());
-        }
+                return s.str();
+            });
     });
 
     // --- object remove ------------------------------------------------

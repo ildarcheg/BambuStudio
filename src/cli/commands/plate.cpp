@@ -93,18 +93,14 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
         if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
 
         std::vector<std::string> names = list_plate_names(state);
-        if (mode == OutputMode::Json) {
-            nlohmann::json data;
-            data["plate_count"] = names.size();
-            data["plates"]      = nlohmann::json::array();
-            for (const auto& n : names) data["plates"].push_back(n);
-            emit_ok(mode, "ok", "plate list", data);
-        } else {
-            std::ostringstream m;
-            for (size_t i = 0; i < names.size(); ++i)
-                m << (i+1) << "  " << names[i] << "\n";
-            emit_ok(mode, "ok", m.str());
-        }
+        emit_list_response<std::string>(
+            mode, "plate list", "plate_count", "plates", names,
+            [](const std::string& n) -> nlohmann::json { return n; },
+            [](std::size_t i, const std::string& n) {
+                std::ostringstream s;
+                s << (i + 1) << "  " << n << "\n";
+                return s.str();
+            });
     });
 }
 

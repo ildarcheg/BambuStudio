@@ -100,24 +100,17 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
         }
 
         std::vector<ConfigEntry> entries = config_list(state, la->object_name, la->changed_only);
-
-        if (mode == OutputMode::Json) {
-            nlohmann::json data;
-            data["count"]   = entries.size();
-            data["entries"] = nlohmann::json::array();
-            for (const auto& e : entries) {
-                data["entries"].push_back({
+        emit_list_response<ConfigEntry>(
+            mode, "config list", "count", "entries", entries,
+            [](const ConfigEntry& e) -> nlohmann::json {
+                return {
                     {"key",   e.key},
                     {"value", e.value},
-                });
-            }
-            emit_ok(mode, "ok", "config list", data);
-        } else {
-            std::ostringstream m;
-            for (const auto& e : entries)
-                m << e.key << "=" << e.value << "\n";
-            emit_ok(mode, "ok", m.str());
-        }
+                };
+            },
+            [](std::size_t, const ConfigEntry& e) {
+                return e.key + "=" + e.value + "\n";
+            });
     });
 }
 
