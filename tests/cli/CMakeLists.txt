@@ -35,7 +35,16 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_project_profile_ops.cpp
     unit/test_project_aux_ops.cpp
     unit/test_png_placeholder.cpp
-    # roundtrip/ is a placeholder for future phases.
+    # Roundtrip tests: in-process load -> mutate -> save -> reload cycles.
+    # Ported from OrcaSlicer tests/cli/roundtrip/ as cross-project convergence
+    # (2026-05-22).
+    roundtrip/test_project_init.cpp
+    roundtrip/test_plate.cpp
+    roundtrip/test_save_atomic.cpp
+    roundtrip/test_output_flag.cpp
+    roundtrip/test_split.cpp
+    roundtrip/test_merge.cpp
+    roundtrip/test_project_tab.cpp
 )
 
 # cli_tests links the bambu_cli_core static library (defined in src/cli/
