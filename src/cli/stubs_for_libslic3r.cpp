@@ -2,12 +2,41 @@
 // libslic3r static lib references (Http, BBL_Encrypt). Avoids dragging
 // curl/openssl-ssl/crypt32 into the bambu-cli dependency surface.
 // Do NOT compile src/slic3r/Utils/Http.cpp or src/slic3r/Utils/BBLUtil.cpp
-// into bambu-cli — these stubs replace them.
+// into bambu-cli -- these stubs replace them.
 //
 // Important: the stubs must match the EXACT signatures from Http.hpp and
 // BBLUtil.hpp. We include the real Http.hpp to match the class layout.
 // For BBL_Encrypt, we provide direct symbol stubs without the header to
 // avoid pulling in nlohmann/json.hpp through BBLUtil.hpp.
+//
+// Structural divergence from Orca (verified 2026-05-22, cross-project
+// convergence Round 2 item B6):
+//   Bambu's libslic3r contains LogSink.cpp (src/libslic3r/CMakeLists.txt
+//   lines 43-44 register it; src/libslic3r/LogSink.cpp:6 includes
+//   slic3r/Utils/Http.hpp; :120, :162, :280, :380 call Slic3r::Http::get
+//   and Slic3r::BBL_Encrypt::AES256CBC_Encrypt/Decrypt). OrcaSlicer's
+//   libslic3r has no LogSink file at all, so orca_cli_core links libslic3r
+//   alone without needing any stubs.
+//
+//   Experimentally removing this file from BAMBU_CLI_CORE_SOURCES
+//   produces 8 LNK2001 unresolved externals, all from
+//   libslic3r.lib(LogSink.obj):
+//     Slic3r::Http::get(string), Slic3r::Http::~Http,
+//     Slic3r::Http::timeout_max(long), Slic3r::Http::on_complete,
+//     Slic3r::Http::on_error, Slic3r::Http::perform_sync,
+//     Slic3r::BBL_Encrypt::AES256CBC_Encrypt,
+//     Slic3r::BBL_Encrypt::AES256CBC_Decrypt.
+//
+//   Three alternatives would let us drop this file:
+//     (a) compile src/slic3r/Utils/Http.cpp + BBLUtil.cpp into bambu_cli_core
+//         -- drags in curl, libssl, crypt32 (the whole reason these stubs
+//         exist).
+//     (b) move LogSink.{hpp,cpp} out of libslic3r and into libslic3r_gui --
+//         touches upstream code outside src/cli/.
+//     (c) refactor LogSink to not call Http/BBL_Encrypt -- also touches
+//         upstream code outside src/cli/.
+//   All three are larger surface changes than keeping these stubs. So we
+//   keep them.
 
 #include "slic3r/Utils/Http.hpp"
 

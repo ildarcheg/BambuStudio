@@ -24,6 +24,10 @@ set(BAMBU_CLI_STL_DIR
 #
 # Sibling pattern: matches OrcaSlicer's `orca_cli_core` STATIC target.
 set(BAMBU_CLI_CORE_SOURCES
+    # stubs_for_libslic3r.cpp: required because libslic3r's own LogSink.cpp
+    # references Slic3r::Http and Slic3r::BBL_Encrypt. See the comment in
+    # stubs_for_libslic3r.cpp for the verified link-error log and the
+    # structural divergence from Orca (Orca has no LogSink in libslic3r).
     stubs_for_libslic3r.cpp
     nanosvg_impl.cpp
     io.cpp
