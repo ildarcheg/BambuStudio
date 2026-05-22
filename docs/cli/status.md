@@ -400,3 +400,47 @@ a clone-group is ambiguous; deferred per Orca CLI report §10.
 | D.2 commit | `a541471ae` |
 
 - **Smoke-gate (Layer 2 / Bambu Studio):** `[ ]` pending user verification.
+
+---
+
+## Phase B — Thumbnail passthrough (2026-05-22)
+
+Plate thumbnail passthrough and valid-PNG placeholder generator. No new
+CLI surface; purely internal change to `save_project`.
+
+### Sub-phases
+
+- **(B.1) PNG placeholder generator** — `d0d315154`. New files:
+  `src/cli/png_placeholder.{hpp,cpp}`. `make_placeholder_png_128()`
+  emits a 128×128 RGBA 0xC0 PNG via hand-rolled IHDR/IDAT/IEND chunk
+  emitter backed by `mz_crc32` + `mz_compress2(MZ_NO_COMPRESSION)`.
+  6 unit tests in `tests/cli/unit/test_png_placeholder.cpp` covering
+  PNG signature, IHDR fields, IDAT decompression size and pixel values,
+  IEND presence, and CRC validation (including known IEND CRC
+  `0xAE426082`).
+
+- **(B.2) Thumbnail passthrough in `save_project`** — `e054819a5`.
+  Added `source_path` to `ProjectState` (set in `load_project`). Added
+  `rewrite_thumbnails()` in `io.cpp`: after `store_bbs_3mf` writes the
+  output archive, replaces each `plate_N.png` / `plate_N_small.png`
+  entry with either a zero-copy passthrough from the source archive
+  (`mz_zip_writer_add_from_zip_reader`) or a synthesized placeholder PNG
+  for new plates. Updated `assert_plate_thumbnails_128` in
+  `archive_invariants.cpp` to allow `plate_N.png` at any valid size
+  (source thumbnails may be 512×512); `plate_N_small.png` must still be
+  exactly 128×128. 3 e2e tests in
+  `tests/cli/e2e/test_thumbnail_passthrough.cpp`.
+
+### Summary
+
+| Item | Detail |
+|---|---|
+| New source files | `src/cli/png_placeholder.{hpp,cpp}`, `tests/cli/unit/test_png_placeholder.cpp`, `tests/cli/e2e/test_thumbnail_passthrough.cpp` |
+| Phase B test growth | +9 cases / +76 assertions (199→208 total) |
+| Final suite | **208 cases / 966 assertions / 0 failures** |
+| B.1 commit | `d0d315154` |
+| B.2 commit | `e054819a5` |
+
+- **Smoke-gate (Layer 2 / Bambu Studio):** `[ ]` pending user
+  verification — open a CLI-produced .3mf; plate thumbnail should
+  now show the original source image rather than a gray placeholder.
