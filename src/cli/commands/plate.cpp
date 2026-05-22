@@ -3,7 +3,7 @@
 #include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
-#include "op_dispatch.hpp"
+#include "mutation_runner.hpp"
 
 #include <memory>
 #include <sstream>
@@ -44,17 +44,11 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
     add->add_option("--output", a->out_path, "output .3mf (defaults to in-place)");
     add->callback([a, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(a->in_path, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-
-        run_op_or_exit(mode, [&]() { return add_plate(state, a->name); });
-
         const std::string& out = a->out_path.empty() ? a->in_path : a->out_path;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-
-        emit_ok(mode, "ok", "plate added: " + a->name + " -> " + out);
+        run_mutation(mode, a->in_path, out, [&](ProjectState& state) {
+            add_plate(state, a->name);
+            return "plate added: " + a->name + " -> " + out;
+        });
     });
 
     // --- plate remove -------------------------------------------------
@@ -65,17 +59,11 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
     rem->add_option("--output", rm->out_path, "output .3mf (defaults to in-place)");
     rem->callback([rm, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(rm->in_path, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-
-        run_op_or_exit(mode, [&]() { return remove_plate(state, rm->name); });
-
         const std::string& out = rm->out_path.empty() ? rm->in_path : rm->out_path;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-
-        emit_ok(mode, "ok", "plate removed: " + rm->name + " -> " + out);
+        run_mutation(mode, rm->in_path, out, [&](ProjectState& state) {
+            remove_plate(state, rm->name);
+            return "plate removed: " + rm->name + " -> " + out;
+        });
     });
 
     // --- plate rename -------------------------------------------------
@@ -87,17 +75,11 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
     ren->add_option("--output", rn->out_path, "output .3mf (defaults to in-place)");
     ren->callback([rn, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(rn->in_path, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-
-        run_op_or_exit(mode, [&]() { return rename_plate(state, rn->from, rn->to); });
-
         const std::string& out = rn->out_path.empty() ? rn->in_path : rn->out_path;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-
-        emit_ok(mode, "ok", "plate renamed: " + rn->from + " -> " + rn->to + " in " + out);
+        run_mutation(mode, rn->in_path, out, [&](ProjectState& state) {
+            rename_plate(state, rn->from, rn->to);
+            return "plate renamed: " + rn->from + " -> " + rn->to + " in " + out;
+        });
     });
 
     // --- plate list ---------------------------------------------------

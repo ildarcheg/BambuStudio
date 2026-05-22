@@ -4,7 +4,7 @@
 #include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
-#include "op_dispatch.hpp"
+#include "mutation_runner.hpp"
 
 #include <memory>
 #include <sstream>
@@ -68,47 +68,37 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     add->add_option("--scale",     a->scale,     "uniform s OR per-axis x,y[,z]");
     add->callback([a, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(a->in_path, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-
-        // Build ManualTransform from flags (if any supplied).
-        ManualTransform tf;
-        if (!a->translate.empty()) {
-            tf.has_translate = true;
-            if (!parse_triple(a->translate, tf.tx, tf.ty, tf.tz, 0.0)) {
-                emit_error(mode, "usage_error", "bad --translate: " + a->translate);
-                std::exit(to_int(ExitCode::usage_error));
-            }
-        }
-        if (!a->rotate.empty()) {
-            tf.has_rotate = true;
-            if (!parse_triple(a->rotate, tf.rx, tf.ry, tf.rz, 0.0)) {
-                emit_error(mode, "usage_error", "bad --rotate: " + a->rotate);
-                std::exit(to_int(ExitCode::usage_error));
-            }
-        }
-        if (!a->scale.empty()) {
-            tf.has_scale = true;
-            if (!parse_triple(a->scale, tf.sx, tf.sy, tf.sz, 1.0)) {
-                emit_error(mode, "usage_error", "bad --scale: " + a->scale);
-                std::exit(to_int(ExitCode::usage_error));
-            }
-        }
-        const ManualTransform* tf_ptr = (tf.has_translate || tf.has_rotate || tf.has_scale)
-                                        ? &tf : nullptr;
-
-        ObjectRef ref;
-        run_op_or_exit(mode, [&]() {
-            return add_object_to_plate(state, a->plate, a->stl, a->name,
-                                       a->filament, tf_ptr, a->count, &ref);
-        });
-
         const std::string& out = a->out_path.empty() ? a->in_path : a->out_path;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
 
-        emit_ok(mode, "ok", "object added: " + ref.object_name + " -> " + out);
+        // CLI-arg parsing (independent of project state). Bad input throws
+        // std::invalid_argument which run_mutation's default map routes to
+        // usage_error (exit 1). Run this inside the mutator so the run_mutation
+        // envelope handles the error path too.
+        ObjectRef ref;
+        run_mutation(mode, a->in_path, out, [&](ProjectState& state) {
+            ManualTransform tf;
+            if (!a->translate.empty()) {
+                tf.has_translate = true;
+                if (!parse_triple(a->translate, tf.tx, tf.ty, tf.tz, 0.0))
+                    throw std::invalid_argument("bad --translate: " + a->translate);
+            }
+            if (!a->rotate.empty()) {
+                tf.has_rotate = true;
+                if (!parse_triple(a->rotate, tf.rx, tf.ry, tf.rz, 0.0))
+                    throw std::invalid_argument("bad --rotate: " + a->rotate);
+            }
+            if (!a->scale.empty()) {
+                tf.has_scale = true;
+                if (!parse_triple(a->scale, tf.sx, tf.sy, tf.sz, 1.0))
+                    throw std::invalid_argument("bad --scale: " + a->scale);
+            }
+            const ManualTransform* tf_ptr =
+                (tf.has_translate || tf.has_rotate || tf.has_scale) ? &tf : nullptr;
+
+            add_object_to_plate(state, a->plate, a->stl, a->name,
+                                a->filament, tf_ptr, a->count, &ref);
+            return "object added: " + ref.object_name + " -> " + out;
+        });
     });
 
     // --- object list --------------------------------------------------
@@ -154,14 +144,11 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     orm->add_option("--output", ora->out,  "output .3mf (defaults to in-place)");
     orm->callback([ora, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(ora->in, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-        run_op_or_exit(mode, [&]() { return remove_object(state, ora->name); });
         const std::string& out = ora->out.empty() ? ora->in : ora->out;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-        emit_ok(mode, "ok", "object removed: " + ora->name);
+        run_mutation(mode, ora->in, out, [&](ProjectState& state) {
+            remove_object(state, ora->name);
+            return "object removed: " + ora->name;
+        });
     });
 
     // --- object set-filament ------------------------------------------
@@ -177,21 +164,14 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     sf->add_option("--output",   sa->out,      "output .3mf (defaults to in-place)");
     sf->callback([sa, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(sa->in, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-        run_op_or_exit(mode, [&]() {
-            return set_object_filament(state, sa->name, sa->filament, sa->part);
-        });
         const std::string& out = sa->out.empty() ? sa->in : sa->out;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-        if (sa->part >= 0) {
-            emit_ok(mode, "ok", "set-filament: " + sa->name + " part " + std::to_string(sa->part) +
-                                " -> " + std::to_string(sa->filament));
-        } else {
-            emit_ok(mode, "ok", "set-filament: " + sa->name + " -> " + std::to_string(sa->filament));
-        }
+        run_mutation(mode, sa->in, out, [&](ProjectState& state) {
+            set_object_filament(state, sa->name, sa->filament, sa->part);
+            if (sa->part >= 0)
+                return "set-filament: " + sa->name + " part " + std::to_string(sa->part) +
+                       " -> " + std::to_string(sa->filament);
+            return "set-filament: " + sa->name + " -> " + std::to_string(sa->filament);
+        });
     });
 }
 

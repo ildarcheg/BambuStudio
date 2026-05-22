@@ -4,7 +4,7 @@
 #include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
-#include "op_dispatch.hpp"
+#include "mutation_runner.hpp"
 
 #include <memory>
 #include <sstream>
@@ -46,20 +46,14 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
     set_cmd->callback([sa, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
                           ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(sa->in_path, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-
-        run_op_or_exit(mode, [&]() {
-            return config_set(state, sa->object_name, sa->key, sa->value);
-        });
-
         const std::string& out = sa->out_path.empty() ? sa->in_path : sa->out_path;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-
-        std::string target = sa->object_name.empty() ? "project" : ("object '" + sa->object_name + "'");
-        emit_ok(mode, "ok", "config set: " + target + " " + sa->key + "=" + sa->value + " -> " + out);
+        run_mutation(mode, sa->in_path, out, [&](ProjectState& state) {
+            config_set(state, sa->object_name, sa->key, sa->value);
+            std::string target = sa->object_name.empty()
+                ? std::string("project")
+                : ("object '" + sa->object_name + "'");
+            return "config set: " + target + " " + sa->key + "=" + sa->value + " -> " + out;
+        });
     });
 
     // --- config unset -----------------------------------------------------
@@ -72,24 +66,18 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
     unset_cmd->callback([ua, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
                           ? OutputMode::Json : OutputMode::Text;
-        ProjectState state;
-        IoResult lr = load_project(ua->in_path, state);
-        if (!lr.ok) { emit_error(mode, lr.error_code, lr.error_message); std::exit(lr.exit_code); }
-
-        run_op_or_exit(mode, [&]() {
-            return config_unset(state, ua->object_name, ua->key);
-        });
-
         const std::string& out = ua->out_path.empty() ? ua->in_path : ua->out_path;
-        IoResult sr = save_project(state, out);
-        if (!sr.ok) { emit_error(mode, sr.error_code, sr.error_message); std::exit(sr.exit_code); }
-
-        std::string target = ua->object_name.empty() ? "project" : ("object '" + ua->object_name + "'");
-        emit_ok(mode, "ok", "config unset: " + target + " " + ua->key + " -> " + out);
+        run_mutation(mode, ua->in_path, out, [&](ProjectState& state) {
+            config_unset(state, ua->object_name, ua->key);
+            std::string target = ua->object_name.empty()
+                ? std::string("project")
+                : ("object '" + ua->object_name + "'");
+            return "config unset: " + target + " " + ua->key + " -> " + out;
+        });
     });
 
     // --- config list ------------------------------------------------------
-    // Read-only — no --output flag.
+    // Read-only - no --output flag.
     auto* list_cmd = cfg->add_subcommand("list", "list config entries for the project or an object");
     auto la = std::make_shared<ConfigListArgs>();
     list_cmd->add_option("in",            la->in_path,     "input .3mf")->required();
