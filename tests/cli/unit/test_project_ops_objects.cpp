@@ -258,55 +258,65 @@ TEST_CASE("list_objects: --plate filter excludes objects from other plates",
 }
 
 // -------------------------------------------------------------------
-// M3.1: failing tests for `set-filament --part Y` per-volume routing.
-// These EXPECT the future 4-arg signature
-// `set_object_filament(state, object_name, filament_idx, part_idx)`.
-// Today's signature is 3-arg, so these TEST_CASEs FAIL TO COMPILE.
-// M3.2 will add the 4th argument and make these compile + pass.
+// Phase E: set-filament --part NAME (string, not integer).
+// ModelVolume::split names parts as "<obj_name>_1", "<obj_name>_2", ...
+// Use two_cubes.stl + split-to-parts to get real volume names.
 // -------------------------------------------------------------------
-TEST_CASE("set_object_filament: --part Y writes to volume config, not object config",
+TEST_CASE("set_object_filament: part NAME writes to named volume config, not object config",
           "[unit][m3_part_filament]") {
     bambu_cli::ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    const std::string stl = std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/two_cubes.stl";
 
-    // Add an object first (single-volume).
+    // Add two_cubes.stl as "twin" then split -> volumes "twin_1", "twin_2".
     REQUIRE(bambu_cli::add_object_to_plate(
-        s, s.plate_data.front()->plate_name, stl, "", -1, nullptr, 1, nullptr).ok);
+        s, s.plate_data.front()->plate_name, stl, "twin", -1, nullptr, 1, nullptr).ok);
+    REQUIRE(bambu_cli::split_object_to_parts(s, "twin") == 2);
 
-    // Set per-volume filament via --part Y (volume index 0; cube.stl is one volume).
-    // Signature: set_object_filament(state, object_name, filament_idx, part_idx).
-    // part_idx >= 0 means per-volume; -1 (default) means object-level.
-    auto r = bambu_cli::set_object_filament(s, "cube", 2, /*part_idx=*/0);
+    auto r = bambu_cli::set_object_filament(s, "twin", 2, "twin_1");
     REQUIRE(r.ok);
 
-    // Object-level extruder must NOT be set (or, if set by prior fixture state,
-    // must NOT be 2 from this call).
-    const auto* obj = s.model.objects[0];
-    // Volume-level extruder must be 2.
-    REQUIRE_FALSE(obj->volumes.empty());
-    const auto* eopt = obj->volumes[0]->config.option("extruder");
-    REQUIRE(eopt != nullptr);
-    REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(eopt)->value == 2);
+    // Find the "twin" object — it is the one with volumes.
+    const Slic3r::ModelObject* obj = nullptr;
+    for (const auto* o : s.model.objects)
+        if (o && o->name == "twin") { obj = o; break; }
+    REQUIRE(obj != nullptr);
+    REQUIRE(obj->volumes.size() == 2);
 
-    // The test name promises "NOT object config" — assert the object-level
-    // extruder did NOT get the per-volume value (it may be unset, or set to
-    // something else from a prior fixture state, but it must not be 2).
-    const auto* obj_eopt = obj->config.option("extruder");
-    if (obj_eopt != nullptr) {
-        REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(obj_eopt)->value != 2);
+    // twin_1's extruder must be 2.
+    const Slic3r::ModelVolume* v1 = nullptr;
+    const Slic3r::ModelVolume* v2 = nullptr;
+    for (const auto* v : obj->volumes) {
+        if (v->name == "twin_1") v1 = v;
+        if (v->name == "twin_2") v2 = v;
     }
+    REQUIRE(v1 != nullptr);
+    REQUIRE(v2 != nullptr);
+    const auto* eopt1 = v1->config.option("extruder");
+    REQUIRE(eopt1 != nullptr);
+    REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(eopt1)->value == 2);
+
+    // twin_2 must NOT have been touched.
+    const auto* eopt2 = v2->config.option("extruder");
+    if (eopt2 != nullptr)
+        REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(eopt2)->value != 2);
+
+    // Object-level extruder must NOT be 2 from this call.
+    const auto* obj_eopt = obj->config.option("extruder");
+    if (obj_eopt != nullptr)
+        REQUIRE(static_cast<const Slic3r::ConfigOptionInt*>(obj_eopt)->value != 2);
 }
 
-TEST_CASE("set_object_filament: --part Y out-of-range -> usage_error",
+TEST_CASE("set_object_filament: unknown part name -> unknown_reference",
           "[unit][m3_part_filament]") {
     bambu_cli::ProjectState s;
     bambu_cli_unit::load_reference_into(s);
-    const std::string stl = bambu_cli_unit::fixture_stl("cube.stl");
+    const std::string stl = std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/two_cubes.stl";
     REQUIRE(bambu_cli::add_object_to_plate(
-        s, s.plate_data.front()->plate_name, stl, "", -1, nullptr, 1, nullptr).ok);
+        s, s.plate_data.front()->plate_name, stl, "twin", -1, nullptr, 1, nullptr).ok);
+    REQUIRE(bambu_cli::split_object_to_parts(s, "twin") == 2);
 
-    // Volume index 5 does not exist on the single-volume cube.
-    REQUIRE_THROWS_AS(bambu_cli::set_object_filament(s, "cube", 1, /*part_idx=*/5),
-                      std::invalid_argument);
+    REQUIRE_THROWS_AS(
+        bambu_cli::set_object_filament(s, "twin", 1, "nonexistent_volume"),
+        std::out_of_range);
 }

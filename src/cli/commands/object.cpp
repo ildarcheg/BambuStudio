@@ -151,22 +151,22 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
     // --- object set-filament ------------------------------------------
     // Stamps extruder=N on ALL ModelObjects with the given name (group-by-name).
     // Applies Bug B retrofit guard before setting the extruder key.
-    struct SFArgs { std::string in, name, out; int filament = 0; int part = -1; };
+    struct SFArgs { std::string in, name, out, part_name; int filament = 0; };
     auto* sf = object->add_subcommand("set-filament", "retrofit filament slot on all objects with the given name");
     auto sa = std::make_shared<SFArgs>();
-    sf->add_option("in",         sa->in,       "input .3mf")->required();
-    sf->add_option("--name",     sa->name,     "object name (all copies updated)")->required();
-    sf->add_option("--filament", sa->filament, "1-based filament slot")->required();
-    sf->add_option("--part",     sa->part,     "0-based volume/part index (omit for object-level)");
-    sf->add_option("--output",   sa->out,      "output .3mf (defaults to in-place)");
+    sf->add_option("in",         sa->in,        "input .3mf")->required();
+    sf->add_option("--name",     sa->name,      "object name (all copies updated)")->required();
+    sf->add_option("--filament", sa->filament,  "1-based filament slot")->required();
+    sf->add_option("--part",     sa->part_name, "volume name (omit for object-level)");
+    sf->add_option("--output",   sa->out,       "output .3mf (defaults to in-place)");
     sf->callback([sa, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;
         const std::string& out = sa->out.empty() ? sa->in : sa->out;
         run_mutation(mode, sa->in, out, [&](ProjectState& state) {
-            set_object_filament(state, sa->name, sa->filament, sa->part);
-            if (sa->part >= 0)
-                return "set-filament: " + sa->name + " part " + std::to_string(sa->part) +
-                       " -> " + std::to_string(sa->filament);
+            set_object_filament(state, sa->name, sa->filament, sa->part_name);
+            if (!sa->part_name.empty())
+                return "set-filament: " + sa->name + " part '" + sa->part_name +
+                       "' -> " + std::to_string(sa->filament);
             return "set-filament: " + sa->name + " -> " + std::to_string(sa->filament);
         });
     });

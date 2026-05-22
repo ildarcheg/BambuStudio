@@ -551,7 +551,7 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
 OpResult set_object_filament(ProjectState& state,
                              const std::string& object_name,
                              int filament_idx,
-                             int part_idx) {
+                             const std::string& part_name) {
     OpResult r;
 
     // Collect ALL matching indices (group-by-name semantics).
@@ -574,50 +574,55 @@ OpResult set_object_filament(ProjectState& state,
         throw std::invalid_argument("filament " + std::to_string(filament_idx) +
                                     " out of range [1," + std::to_string(slot_count) + "]");
 
-    // If per-volume mode requested, pre-validate that EVERY matching object
-    // has at least (part_idx + 1) volumes. We validate before any mutation
-    // so partial failure does not leave half-updated state.
-    if (part_idx >= 0) {
+    // Per-volume mode: collect all volumes with matching name across all
+    // matched objects, then validate at least one was found.
+    if (!part_name.empty()) {
+        using ObjVol = std::pair<Slic3r::ModelObject*, Slic3r::ModelVolume*>;
+        std::vector<ObjVol> targets;
         for (int idx : matches) {
-            const auto* obj = state.model.objects[idx];
+            auto* obj = state.model.objects[idx];
             if (!obj) continue;
-            if (part_idx >= static_cast<int>(obj->volumes.size()))
-                throw std::invalid_argument("part index " + std::to_string(part_idx) +
-                                            " out of range for object '" + object_name +
-                                            "' (has " + std::to_string(obj->volumes.size()) +
-                                            " volume(s))");
+            for (auto* vol : obj->volumes) {
+                if (vol && vol->name == part_name)
+                    targets.push_back({obj, vol});
+            }
         }
+        if (targets.empty())
+            throw std::out_of_range("part name '" + part_name + "' not found across " +
+                                    std::to_string(matches.size()) + " matching object(s)");
+
+        for (auto& [obj, vol] : targets) {
+            if (vol->source.input_file.empty()) {
+                vol->source.input_file = obj->input_file;
+                vol->source.object_idx = 0;
+                // Stamp the actual volume index within the parent object.
+                for (size_t vi = 0; vi < obj->volumes.size(); ++vi) {
+                    if (obj->volumes[vi] == vol) {
+                        vol->source.volume_idx = static_cast<int>(vi);
+                        break;
+                    }
+                }
+            }
+            vol->config.set("extruder", filament_idx);
+        }
+        r.ok = true;
+        return r;
     }
 
-    // Apply to every matching ModelObject.
+    // Object-level mode: apply to every matching ModelObject.
     for (int idx : matches) {
         auto* obj = state.model.objects[idx];
         if (!obj) continue;
 
-        // Bug B retrofit guard (object-level mode only; per-volume mode
-        // operates on a specific volume that is assumed already stamped).
-        if (part_idx < 0) {
-            for (auto* vol : obj->volumes) {
-                if (vol && vol->source.input_file.empty()) {
-                    vol->source.input_file = obj->input_file;
-                    vol->source.object_idx = 0;
-                    vol->source.volume_idx = 0;
-                }
-            }
-            obj->config.set("extruder", filament_idx);
-        } else {
-            // Per-volume mode: stamp source on the target volume only if
-            // empty, then write extruder to its config.
-            auto* vol = obj->volumes[part_idx];
-            if (vol) {
-                if (vol->source.input_file.empty()) {
-                    vol->source.input_file = obj->input_file;
-                    vol->source.object_idx = 0;
-                    vol->source.volume_idx = part_idx;
-                }
-                vol->config.set("extruder", filament_idx);
+        // Bug B retrofit guard.
+        for (auto* vol : obj->volumes) {
+            if (vol && vol->source.input_file.empty()) {
+                vol->source.input_file = obj->input_file;
+                vol->source.object_idx = 0;
+                vol->source.volume_idx = 0;
             }
         }
+        obj->config.set("extruder", filament_idx);
     }
 
     r.ok = true;

@@ -499,3 +499,52 @@ Targeted cleanups across three sub-phases. No new CLI surface.
 | F.1 commit | `864abad7a` |
 | F.2 commits | `dd0e70886`, `0a5ce5ba0` |
 | F.3 commit | `ba627a119` |
+
+---
+
+## Phase E — `--part` NAME rename (2026-05-22)
+
+**Breaking change.** The `--part` option of `object set-filament` changes
+type from integer index to string volume name, aligning with OrcaSlicer's
+group-aware design.
+
+### E.0 — Investigation
+
+`ModelVolume::split` (Model.cpp:3503) assigns names as
+`original_vol_name + "_" + std::to_string(idx + 1)`, so splitting an object
+named `"twin"` produces volumes `"twin_1"`, `"twin_2"`, etc. The CLI's
+`split_object_to_parts` pre-aligns the volume name to the object name
+(project_ops.cpp:940) before calling split, so the naming is deterministic.
+
+### E.1 — Implementation + tests + docs
+
+**Breaking changes:**
+
+- **`--part` type:** `INT` → `TEXT`. Any script passing `--part 0` will now
+  receive exit 6 (unknown_reference) unless a volume happens to be named
+  `"0"`.
+- **Exit code for unknown part:** was exit 1 (usage_error), now exit 6
+  (unknown_reference), matching how unknown object name is handled.
+  Error message: `"part name '<NAME>' not found across <K> matching object(s)"`.
+
+**New semantics:**
+
+When `--part NAME` is given, all volumes named `NAME` across **all matched
+objects** (the group matched by `--name`) receive the extruder stamp. Throws
+`std::out_of_range` (exit 6) if no matching volume is found.
+
+**Tests migrated:**
+
+- `test_project_ops_objects.cpp` — two `[m3_part_filament]` tests rewritten:
+  use `two_cubes.stl` + `split_object_to_parts` → real volume names
+  `"twin_1"` / `"twin_2"`; unknown-name case now expects `std::out_of_range`
+  (not `std::invalid_argument`).
+- `test_object_merge.cpp` — step-h disagreement test updated from
+  `--part 0` / `--part 1` to `--part twin_1` / `--part twin_2`.
+
+### Summary
+
+| Item | Detail |
+|---|---|
+| Phase E test growth | +6 assertions (216 cases / 1003→1009 assertions) |
+| Final suite | **216 cases / 1009 assertions / 0 failures** |

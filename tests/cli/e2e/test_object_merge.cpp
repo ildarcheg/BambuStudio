@@ -96,10 +96,10 @@ TEST_CASE("object merge-parts: step h -- filament disagreement -> exit 7", "[e2e
     // Set different filaments on the split volumes, then merge without --filament
     std::string tmp = build_split_project();
     auto sf1 = spawn_cli({"object", "set-filament", tmp,
-                          "--name", "twin", "--filament", "1", "--part", "0"});
+                          "--name", "twin", "--filament", "1", "--part", "twin_1"});
     REQUIRE(sf1.exit_code == 0);
     auto sf2 = spawn_cli({"object", "set-filament", tmp,
-                          "--name", "twin", "--filament", "2", "--part", "1"});
+                          "--name", "twin", "--filament", "2", "--part", "twin_2"});
     REQUIRE(sf2.exit_code == 0);
 
     auto r = spawn_cli({"object", "merge-parts", tmp,
