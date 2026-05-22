@@ -918,4 +918,61 @@ std::vector<ConfigEntry> config_list(const ProjectState& state,
     return out;
 }
 
+// ---- D1: object split-to-parts --------------------------------------------
+
+size_t split_object_to_parts(ProjectState& state, const std::string& name)
+{
+    // First-match on --name. See design note in project_ops.hpp.
+    int idx = -1;
+    for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
+        if (state.model.objects[i]->name == name) { idx = i; break; }
+    }
+    if (idx < 0)
+        throw std::out_of_range("split-to-parts: object not found: " + name);
+
+    Slic3r::ModelObject* obj = state.model.objects[idx];
+
+    // Validation: exactly one volume.
+    if (obj->volumes.size() != 1)
+        throw std::invalid_argument(
+            "split-to-parts requires exactly 1 volume, got " +
+            std::to_string(obj->volumes.size()));
+
+    Slic3r::ModelVolume* vol = obj->volumes[0];
+
+    // Validation: must be a solid model part, not a modifier/support/etc.
+    if (vol->type() != Slic3r::ModelVolumeType::MODEL_PART)
+        throw std::invalid_argument(
+            "split-to-parts: volume type must be MODEL_PART");
+
+    // Align volume name with object name before split so resulting volumes
+    // get sensible names (split() appends _1, _2, ...).
+    vol->name = obj->name;
+
+    // Capture source attribution before split — ModelVolume::split() resets
+    // source on the first resulting volume (this->source = ModelVolume::Source()).
+    const std::string saved_input_file = vol->source.input_file;
+
+    // Split. filament_count is the number of loaded filament slots.
+    // Scale determinant defaults to 1.f (no scaling applied during split).
+    const unsigned int filament_count =
+        static_cast<unsigned int>(get_filament_count(state.project_config));
+    size_t parts = vol->split(filament_count);
+
+    if (parts <= 1)
+        throw std::invalid_argument(
+            "split-to-parts: mesh has only 1 connected component");
+
+    // Re-stamp source.input_file on every resulting volume that lost it
+    // (defense-in-depth: split() resets source on the first volume).
+    if (!saved_input_file.empty()) {
+        for (auto* v : obj->volumes) {
+            if (v->source.input_file.empty())
+                v->source.input_file = saved_input_file;
+        }
+    }
+
+    return parts;
+}
+
 } // namespace bambu_cli

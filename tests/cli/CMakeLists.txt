@@ -15,6 +15,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_object_filament.cpp
     e2e/test_object_transforms.cpp
     e2e/test_object_remove_set_filament.cpp
+    e2e/test_object_split.cpp
     e2e/test_config.cpp
     e2e/test_json_and_exit_codes.cpp
     e2e/test_project_info.cpp
@@ -24,6 +25,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
     unit/test_project_ops_objects.cpp
+    unit/test_project_ops_split.cpp
     unit/test_project_ops_config.cpp
     unit/test_plate_stride.cpp
     unit/test_project_info_ops.cpp

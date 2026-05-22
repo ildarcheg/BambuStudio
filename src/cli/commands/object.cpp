@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <sstream>
+#include <typeindex>
 #include <vector>
 
 namespace bambu_cli {
@@ -168,6 +169,33 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
                        " -> " + std::to_string(sa->filament);
             return "set-filament: " + sa->name + " -> " + std::to_string(sa->filament);
         });
+    });
+
+    // --- object split-to-parts -------------------------------------------
+    // First-match semantics: --name selects the FIRST matching ModelObject.
+    // Not group-by-name — splitting across a clone-group is ambiguous (which
+    // clone do we split?). Per Phase D prompt (2026-05-22) and Orca report §10.
+    struct SplitArgs { std::string in, name, out; };
+    auto* spt = object->add_subcommand("split-to-parts",
+                                       "split a single-volume object into multiple parts by mesh components");
+    auto spa = std::make_shared<SplitArgs>();
+    spt->add_option("in",       spa->in,   "input .3mf")->required();
+    spt->add_option("--name",   spa->name, "object name (first match)")->required();
+    spt->add_option("--output", spa->out,  "output .3mf (defaults to in-place)");
+    spt->callback([spa, mode_out]() {
+        OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                          ? OutputMode::Json : OutputMode::Text;
+        const std::string& out = spa->out.empty() ? spa->in : spa->out;
+        // std::invalid_argument is remapped to exit 7 (invalid_state) for
+        // this verb — invalid mesh state, not a usage error.
+        MutationExceptionMap overrides = {
+            {std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"}}
+        };
+        run_mutation(mode, spa->in, out, [&](ProjectState& state) {
+            size_t parts = split_object_to_parts(state, spa->name);
+            return "split-to-parts: " + spa->name + " -> " +
+                   std::to_string(parts) + " parts.";
+        }, overrides);
     });
 }
 

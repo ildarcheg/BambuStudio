@@ -172,6 +172,26 @@ std::vector<ConfigEntry> config_list(const ProjectState& state,
                                      const std::string& object_name,
                                      bool only_changed);
 
+// ---- D1: object split-to-parts --------------------------------------------
+
+// Split the FIRST ModelObject whose name == <name> into multiple volumes by
+// disconnected mesh components. First-match semantics — does NOT operate on
+// all objects sharing the name (unlike remove_object / set_object_filament).
+//
+// Design decision: first-match, not group-by-name, because it is ambiguous
+// which clone to split when N copies share the same name. Per Phase D prompt
+// (2026-05-22) and OrcaSlicer CLI report §10 — both defer the group case.
+//
+// Throws:
+//   std::out_of_range    if name not found in state.model.objects  (-> exit 6)
+//   std::invalid_argument if:
+//     - the object has != 1 volume                                  (-> exit 7 via override)
+//     - that volume is not ModelVolumeType::MODEL_PART              (-> exit 7 via override)
+//     - the mesh has only 1 connected component                     (-> exit 7 via override)
+//
+// Returns the number of resulting volumes (always >= 2 on success).
+size_t split_object_to_parts(ProjectState& state, const std::string& name);
+
 // Plate origin formula in world coordinates, mirroring BBS PartPlateList
 // stride: stride_xy = bed_extent * (1 + LOGICAL_PART_PLATE_GAP) with
 // LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2. Plate 1 (1-based) returns (0,0,0).
