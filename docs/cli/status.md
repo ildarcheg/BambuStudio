@@ -283,3 +283,68 @@ with single `REQUIRE_THROWS_AS` calls.
 
 **Delta over `src/cli` + `tests/cli`**: 26 files changed, +660 / -455
 (2 new headers: `exceptions.hpp`, `commands/mutation_runner.hpp`).
+
+---
+
+## Phase C — Project tab (2026-05-21 / 2026-05-22)
+
+10 new leaf verbs, 5 new typed exceptions, PNG cover validator,
+Windows-safe aux-name sanitizer. All verbs use the Phase-A architecture
+(run_mutation / emit_list_response / typed exceptions / static lib).
+
+### Sub-phases
+
+- **(C.0) BBS 3MF profile storage investigation** — `a8b885eed`
+  (docs-only commit). Grepped `src/libslic3r/Format/bbs_3mf.cpp` for
+  ProfileTitle, metadata_items, profile_info, cover. Finding:
+  `store_bbs_3mf` reads profile fields from `model.profile_info` struct
+  directly, NOT from `metadata_items["ProfileTitle"]` (Orca reads from
+  metadata_items — hence Orca CLI mirrors into both; Bambu CLI does NOT
+  need to mirror). Info fields read from `model.model_info` struct.
+  Cover paths are archive-relative strings; image bytes live in the
+  aux temp dir (`Auxiliaries/`). Note: Bambu has a typo `ProfileTile`
+  (not `ProfileTitle`) in `Model.hpp`. Findings documented in
+  `docs/cli/notes/2026-05-21-bbs-profile-storage.md`.
+
+- **(C.1) project info show/set/clear + PNG cover validator** —
+  `faf0504e4`. New files: `src/cli/project_tab_ops.{hpp,cpp}`,
+  `src/cli/commands/project_tab.{hpp,cpp}`. Exceptions: `BadCoverImage`
+  (exit 4), `InvalidField` (exit 4) — derived from `BadConfigError`.
+  Cover embed: validates 8-byte PNG signature, writes bytes to aux
+  temp dir, sets `model_info->cover_file = "Auxiliaries/cover.png"`.
+  Tests: 27 new cases / 98 new assertions.
+
+- **(C.2) project profile show/set/clear** — `78e4cb81e`.
+  Implementation scaffolded in C.1; this commit adds tests only.
+  Applies C.0 finding: writes go directly to `model.profile_info`
+  struct (ProfileTile/ProfileDescription/ProfileCover) — no
+  metadata_items mirroring. user_id/user_name read-only (not settable
+  or clearable). Tests: 26 new cases / 82 new assertions.
+
+- **(C.3) project aux list/add/remove/export + sanitize_aux_name** —
+  `c8186e0ac`. New exceptions: `BadAuxFile` (exit 2), `AuxNameError`
+  (exit 4), `AuxCollisionError` (exit 5). `AuxFolder` enum + helpers
+  `folder_flag` / `folder_json_key` / `folder_subdir`. sanitize_aux_name
+  rejects: path separators, dot-only names, leading/trailing whitespace,
+  22 Windows reserved names (CON PRN AUX NUL COM1-9 LPT1-9) case-
+  insensitive. Critical fix: added `LoadAuxiliary` to `load_model_and_config()`
+  in `io.cpp` so aux files extracted from archive persist across CLI
+  invocations. Tests: `DYNAMIC_SECTION` over the full reserved-name set
+  per Orca §9 pattern. Fixture: `assembly_smoke.txt` (12 bytes).
+  26 new cases.
+
+### Summary
+
+| Item | Detail |
+|---|---|
+| New leaf verbs | 10 (`project info show/set/clear`, `profile show/set/clear`, `aux list/add/remove/export`) |
+| New typed exceptions | 5 (`BadCoverImage`, `InvalidField`, `BadAuxFile`, `AuxNameError`, `AuxCollisionError`) |
+| New source files | `project_tab_ops.{hpp,cpp}`, `commands/project_tab.{hpp,cpp}` |
+| Phase C test growth | +79 cases / +313 assertions (92→171 total) |
+| Final suite | **171 cases / 758 assertions / 0 failures** |
+| C.0 commit | `a8b885eed` |
+| C.1 commit | `faf0504e4` |
+| C.2 commit | `78e4cb81e` |
+| C.3 commit | `c8186e0ac` |
+
+- **Smoke-gate (Layer 2 / Bambu Studio):** `[ ]` pending user verification.
