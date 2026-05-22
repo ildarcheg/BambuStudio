@@ -5,22 +5,25 @@ set(BAMBU_CLI_TEST_SOURCES
     cli_tests_main.cpp
     test_helpers.cpp
     archive_invariants.cpp
-    test_project_init.cpp
-    test_inspect.cpp
-    test_plate_add.cpp
-    test_plate_list.cpp
-    test_object_add.cpp
-    test_object_filament.cpp
-    test_object_transforms.cpp
-    test_config.cpp
-    test_plate_remove_rename.cpp
-    test_object_remove_set_filament.cpp
-    test_json_and_exit_codes.cpp
-    test_plate_stride.cpp
+    # E2E tests: spawn bambu-cli.exe via run_cli + assert on stdout/stderr/exit/archive.
+    e2e/test_project_init.cpp
+    e2e/test_inspect.cpp
+    e2e/test_plate_add.cpp
+    e2e/test_plate_list.cpp
+    e2e/test_plate_remove_rename.cpp
+    e2e/test_object_add.cpp
+    e2e/test_object_filament.cpp
+    e2e/test_object_transforms.cpp
+    e2e/test_object_remove_set_filament.cpp
+    e2e/test_config.cpp
+    e2e/test_json_and_exit_codes.cpp
+    # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
     unit/test_project_ops_objects.cpp
     unit/test_project_ops_config.cpp
+    unit/test_plate_stride.cpp
+    # roundtrip/ is a placeholder for future phases.
 )
 
 add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
@@ -43,6 +46,7 @@ endif()
 target_include_directories(cli_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/cli
+    ${CMAKE_CURRENT_SOURCE_DIR}     # for "test_helpers.hpp" / "archive_invariants.hpp" from e2e/ and unit/
 )
 target_compile_definitions(cli_tests PRIVATE
     BAMBU_CLI_EXE="$<TARGET_FILE:bambu-cli>"
