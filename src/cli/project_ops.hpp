@@ -152,8 +152,7 @@ OpResult config_unset(ProjectState& state,
 // from libslic3r defaults are returned. Otherwise, all keys currently set on
 // the target are returned.
 // Error codes (in OpResult, but config_list returns the list directly):
-//   If object_name is provided and not found, returns empty vector
-//   (caller should use find_object_by_name first to distinguish not-found).
+//   If object_name is provided and not found, returns empty vector.
 // NOTE: for project_config against libslic3r defaults, many keys may differ
 //   because the printer preset sets them — that's expected.
 std::vector<ConfigEntry> config_list(const ProjectState& state,

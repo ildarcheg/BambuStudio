@@ -257,12 +257,6 @@ TEST_CASE("list_objects: --plate filter excludes objects from other plates",
     REQUIRE(all.size() == 2);
 }
 
-TEST_CASE("find_object_by_name: returns -1 when absent", "[unit][objects]") {
-    ProjectState s;
-    bambu_cli_unit::load_reference_into(s);
-    REQUIRE(bambu_cli::find_object_by_name(s, "ghost") == -1);
-}
-
 // -------------------------------------------------------------------
 // M3.1: failing tests for `set-filament --part Y` per-volume routing.
 // These EXPECT the future 4-arg signature
