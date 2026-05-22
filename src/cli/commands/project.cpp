@@ -1,3 +1,5 @@
+#include "project_tab.hpp"
+
 #include "../exit_codes.hpp"
 #include "../io.hpp"
 #include "../invariant_guard.hpp"
@@ -27,6 +29,9 @@ void register_project_subcommands(CLI::App& app, OutputMode* mode_out) {
     auto args = std::make_shared<ProjectInitArgs>();
     init->add_option("out", args->out_path, "output .3mf path")->required();
     init->add_option("--template", args->template_path, "reference .3mf path")->required();
+
+    // Register info / profile / aux leaf verbs.
+    register_project_tab_subcommands(project, mode_out);
 
     init->callback([args, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;

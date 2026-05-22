@@ -30,7 +30,9 @@ set(BAMBU_CLI_CORE_SOURCES
     invariant_guard.cpp
     json_output.cpp
     project_ops.cpp
+    project_tab_ops.cpp
     commands/project.cpp
+    commands/project_tab.cpp
     commands/inspect.cpp
     commands/plate.cpp
     commands/object.cpp
