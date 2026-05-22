@@ -197,6 +197,52 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
                    std::to_string(parts) + " parts.";
         }, overrides);
     });
+
+    // --- object merge-parts -----------------------------------------------
+    // First-match semantics: --name selects the FIRST matching ModelObject.
+    // Not group-by-name — merging across a clone-group is ambiguous (which
+    // clone's volumes do we merge?). Per Phase D prompt (2026-05-22) and Orca §10.
+    struct MergeArgs { std::string in, name, parts_str, into, out; int filament = -1; };
+    auto* mpt = object->add_subcommand("merge-parts",
+                                       "merge named volumes of an object into a single new volume");
+    auto mpa = std::make_shared<MergeArgs>();
+    mpt->add_option("in",          mpa->in,        "input .3mf")->required();
+    mpt->add_option("--name",      mpa->name,      "object name (first match)")->required();
+    mpt->add_option("--parts",     mpa->parts_str, "comma-separated volume names to merge")->required();
+    mpt->add_option("--into",      mpa->into,      "name for the merged result volume")->required();
+    mpt->add_option("--filament",  mpa->filament,  "1-based filament slot for merged volume");
+    mpt->add_option("--output",    mpa->out,       "output .3mf (defaults to in-place)");
+    mpt->callback([mpa, mode_out]() {
+        OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                          ? OutputMode::Json : OutputMode::Text;
+        const std::string& out = mpa->out.empty() ? mpa->in : mpa->out;
+
+        // Parse --parts CSV (step a: empty list -> exit 1 before entering run_mutation)
+        std::vector<std::string> parts;
+        {
+            std::istringstream ss(mpa->parts_str);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                if (!tok.empty()) parts.push_back(tok);
+            }
+        }
+        if (parts.empty()) {
+            emit_error(mode, "usage_error", "merge-parts: --parts must not be empty");
+            std::exit(to_int(ExitCode::usage_error));
+        }
+
+        // Override: std::invalid_argument -> exit 7 (invalid_state) for mesh-state checks.
+        MutationExceptionMap overrides = {
+            {std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"}}
+        };
+        run_mutation(mode, mpa->in, out, [&](ProjectState& state) {
+            MergePartsParams p;
+            p.parts    = parts;
+            p.into     = mpa->into;
+            p.filament = mpa->filament;
+            return merge_object_parts(state, mpa->name, p);
+        }, overrides);
+    });
 }
 
 } // namespace bambu_cli

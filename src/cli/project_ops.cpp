@@ -975,4 +975,143 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name)
     return parts;
 }
 
+// ---- D2: object merge-parts -----------------------------------------------
+
+std::string merge_object_parts(ProjectState& state,
+                               const std::string& name,
+                               const MergePartsParams& p)
+{
+    // Step b: First-match on --name.
+    Slic3r::ModelObject* obj = nullptr;
+    for (auto* o : state.model.objects) {
+        if (o->name == name) { obj = o; break; }
+    }
+    if (!obj)
+        throw std::out_of_range("merge-parts: object not found: " + name);
+
+    // Step c: Lookup each part by name in obj.volumes. Track indices.
+    std::vector<size_t> src_indices;
+    src_indices.reserve(p.parts.size());
+    for (const auto& part_name : p.parts) {
+        size_t found = static_cast<size_t>(-1);
+        for (size_t i = 0; i < obj->volumes.size(); ++i) {
+            if (obj->volumes[i]->name == part_name) { found = i; break; }
+        }
+        if (found == static_cast<size_t>(-1))
+            throw std::out_of_range("merge-parts: part not found: " + part_name);
+        src_indices.push_back(found);
+    }
+
+    // Step d: --into must not already exist in obj.volumes.
+    for (auto* v : obj->volumes) {
+        if (v->name == p.into)
+            throw DuplicateNameError("merge-parts: volume '" + p.into + "' already exists");
+    }
+
+    // Step e: Filament range check (if provided).
+    const size_t slot_count = get_filament_count(state.project_config);
+    if (p.filament != -1) {
+        if (p.filament < 1 || static_cast<size_t>(p.filament) > slot_count)
+            throw std::out_of_range(
+                "merge-parts: filament " + std::to_string(p.filament) +
+                " out of range [1, " + std::to_string(slot_count) + "]");
+    }
+
+    // Step f: Each source must be MODEL_PART.
+    for (size_t idx : src_indices) {
+        if (obj->volumes[idx]->type() != Slic3r::ModelVolumeType::MODEL_PART)
+            throw std::invalid_argument(
+                "merge-parts: part '" + obj->volumes[idx]->name + "' is not MODEL_PART");
+    }
+
+    // Step g: Each source mesh must be non-empty.
+    for (size_t idx : src_indices) {
+        if (obj->volumes[idx]->mesh().empty())
+            throw std::invalid_argument(
+                "merge-parts: part '" + obj->volumes[idx]->name + "' has empty mesh");
+    }
+
+    // Step h: Filament agreement (if --filament not specified).
+    int agreed_extruder = p.filament;
+    if (p.filament == -1) {
+        int first_ext = -1;
+        for (size_t idx : src_indices) {
+            int e = obj->volumes[idx]->extruder_id();
+            if (first_ext == -1) { first_ext = e; }
+            else if (e != first_ext)
+                throw std::invalid_argument(
+                    "merge-parts: parts have different filament assignments; use --filament to resolve");
+        }
+        agreed_extruder = first_ext;
+    }
+
+    // Step i: Per-volume config: only "extruder" key allowed.
+    for (size_t idx : src_indices) {
+        for (const std::string& key : obj->volumes[idx]->config.keys()) {
+            if (key != "extruder")
+                throw std::invalid_argument(
+                    "merge-parts: part '" + obj->volumes[idx]->name +
+                    "' has per-volume config key '" + key + "' (only extruder allowed)");
+        }
+    }
+
+    // --- All validation passed -- execution ---
+
+    // Find lowest-indexed source for placement and source attribution.
+    const size_t min_src_idx =
+        *std::min_element(src_indices.begin(), src_indices.end());
+    const Slic3r::ModelVolume* lowest_vol = obj->volumes[min_src_idx];
+    const std::string  saved_input_file  = lowest_vol->source.input_file;
+    const int          saved_object_idx  = lowest_vol->source.object_idx;
+    const int          saved_volume_idx  = lowest_vol->source.volume_idx;
+
+    // Build merged TriangleMesh: bake each source's transform, then accumulate.
+    Slic3r::TriangleMesh merged;
+    for (size_t idx : src_indices) {
+        Slic3r::TriangleMesh copy = obj->volumes[idx]->mesh();
+        copy.transform(obj->volumes[idx]->get_matrix());
+        merged.merge(copy);
+    }
+
+    // Capture N before adding merged volume.
+    const size_t N_before = obj->volumes.size();
+
+    // Add merged volume at end, bypassing bbox-center shift.
+    Slic3r::ModelVolume* new_vol = obj->add_volume(merged, false);
+    new_vol->name = p.into;
+    new_vol->config.set("extruder", agreed_extruder);
+    new_vol->source.input_file = saved_input_file;
+    new_vol->source.object_idx = saved_object_idx;
+    new_vol->source.volume_idx = saved_volume_idx;
+
+    // Delete source volumes in reverse-index order.
+    std::vector<size_t> sorted_desc(src_indices);
+    std::sort(sorted_desc.begin(), sorted_desc.end(), std::greater<size_t>());
+    for (size_t idx : sorted_desc) {
+        obj->delete_volume(idx);
+    }
+    // new_vol has shifted left by S positions (all sources had idx < N_before).
+    // new_vol is now at index (N_before - src_indices.size()).
+
+    // Single-volume serialization shim.
+    if (obj->volumes.size() == 1) {
+        obj->config.set("extruder", agreed_extruder);
+    }
+
+    // Move merged volume to lowest-source-index slot for determinism.
+    const size_t S = src_indices.size();
+    const size_t current_pos = N_before - S;
+    const size_t target_pos  = min_src_idx;
+    if (current_pos != target_pos) {
+        std::rotate(
+            obj->volumes.begin() + static_cast<std::ptrdiff_t>(target_pos),
+            obj->volumes.begin() + static_cast<std::ptrdiff_t>(current_pos),
+            obj->volumes.begin() + static_cast<std::ptrdiff_t>(current_pos) + 1
+        );
+    }
+
+    return "merge-parts: " + std::to_string(S) + " parts -> '" +
+           p.into + "' in " + name + ".";
+}
+
 } // namespace bambu_cli

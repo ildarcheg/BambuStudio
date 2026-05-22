@@ -199,4 +199,38 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name);
 Slic3r::Vec3d plate_world_origin(int plate_index_1based,
                                  double bed_width, double bed_height);
 
+// ---- D2: object merge-parts -----------------------------------------------
+
+// Parameters for merge_object_parts. --parts must be non-empty (validated by
+// the caller before calling this function).
+struct MergePartsParams {
+    std::vector<std::string> parts;   // volume names to merge (non-empty)
+    std::string              into;    // name for the resulting merged volume
+    int                      filament = -1;  // 1-based extruder slot, -1 = auto
+};
+
+// Merge named volumes of FIRST-MATCHING object <name> into a single new volume.
+// First-match semantics -- NOT group-by-name. Splitting across a clone-group is
+// ambiguous (which clone's volumes do we merge?). Per Phase D prompt (2026-05-22)
+// and OrcaSlicer CLI report §10 -- both defer the group case.
+//
+// 8-step deterministic validation (fail-fast, must run in this exact order):
+//   b. First-match on <name>. Unknown -> std::out_of_range           (exit 6)
+//   c. Each part by name in obj.volumes. Unknown -> std::out_of_range (exit 6)
+//   d. --into must not exist. Collision -> DuplicateNameError          (exit 5)
+//   e. --filament range [1, slot_count]. Out of range -> std::out_of_range (exit 6)
+//   f. Each source must be MODEL_PART. Not -> std::invalid_argument    (exit 7 via override)
+//   g. Each source mesh non-empty. Empty -> std::invalid_argument      (exit 7 via override)
+//   h. Filament agreement (if --filament not given). Disagree -> std::invalid_argument (exit 7)
+//   i. Per-volume config: only "extruder" allowed. Other key -> std::invalid_argument (exit 7)
+//
+// (Step a -- empty --parts -- is validated in the CLI callback BEFORE run_mutation,
+//  so it exits 1 directly without hitting this function.)
+//
+// On success: places merged volume at the lowest-indexed source slot (deterministic
+// under --parts reordering), deletes source volumes, returns success message.
+std::string merge_object_parts(ProjectState& state,
+                               const std::string& name,
+                               const MergePartsParams& p);
+
 } // namespace bambu_cli
