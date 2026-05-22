@@ -729,16 +729,6 @@ static void remove_from_different_settings_to_system(Slic3r::DynamicPrintConfig&
     }
 }
 
-int find_object_by_name(const ProjectState& state, const std::string& name) {
-    for (int i = 0; i < static_cast<int>(state.model.objects.size()); ++i) {
-        const auto* obj = state.model.objects[i];
-        if (obj && obj->name == name)
-            return i;
-    }
-    return -1;
-}
-
-
 OpResult config_set(ProjectState& state,
                     const std::string& object_name,
                     const std::string& key,

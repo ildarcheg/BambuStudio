@@ -6,6 +6,7 @@
 #include "../extern/CLI11/CLI11.hpp"
 #include "mutation_runner.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <sstream>
 
@@ -92,7 +93,10 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out) {
 
         // Validate object reference before listing.
         if (!la->object_name.empty()) {
-            if (find_object_by_name(state, la->object_name) < 0) {
+            const bool found = std::any_of(
+                state.model.objects.begin(), state.model.objects.end(),
+                [&](const auto* o){ return o && o->name == la->object_name; });
+            if (!found) {
                 emit_error(mode, "unknown_reference",
                            "object '" + la->object_name + "' not found");
                 std::exit(to_int(ExitCode::unknown_reference));

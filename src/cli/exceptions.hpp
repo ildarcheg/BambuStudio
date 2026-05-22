@@ -57,4 +57,38 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// ============================================================
+// Derived exceptions (Phase C — project-tab operations)
+// ============================================================
+
+// Cover image is not a PNG (signature mismatch) or path is unreadable. -> exit 4.
+class BadCoverImage : public BadConfigError {
+public:
+    using BadConfigError::BadConfigError;
+};
+
+// Field name not in the allowed whitelist for info clear or profile clear. -> exit 4.
+class InvalidField : public BadConfigError {
+public:
+    using BadConfigError::BadConfigError;
+};
+
+// Aux source file does not exist / unreadable. -> exit 2.
+class BadAuxFile : public FileNotFoundError {
+public:
+    using FileNotFoundError::FileNotFoundError;
+};
+
+// Sanitized name is invalid (path separators, dot-only, whitespace, reserved). -> exit 4.
+class AuxNameError : public BadConfigError {
+public:
+    using BadConfigError::BadConfigError;
+};
+
+// Target name already exists in the folder and --force was not given. -> exit 5.
+class AuxCollisionError : public DuplicateNameError {
+public:
+    using DuplicateNameError::DuplicateNameError;
+};
+
 } // namespace bambu_cli

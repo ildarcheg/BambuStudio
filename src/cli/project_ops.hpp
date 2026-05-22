@@ -124,18 +124,6 @@ OpResult set_object_filament(ProjectState& state,
 
 // ---- M7: config set / unset / list ----------------------------------------
 
-// Find the model.objects index of the FIRST ModelObject whose name == <name>.
-// Returns -1 if not found.
-//
-// NOTE: with the N-objects-per-`--count` model, multiple ModelObjects can
-// share a name. Callers that need to operate on EVERY matching object
-// (remove_object, set_object_filament, config_set, config_unset, config_list)
-// iterate over matches themselves; find_object_by_name is now used purely
-// as an EXISTENCE CHECK ("any object with this name?"). The "first index"
-// return value remains for backward compatibility but should not be relied
-// upon for mutation routing.
-int find_object_by_name(const ProjectState& state, const std::string& name);
-
 // A single key-value config entry (used by config_list).
 struct ConfigEntry {
     std::string key;
