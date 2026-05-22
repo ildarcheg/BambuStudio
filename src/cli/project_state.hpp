@@ -4,6 +4,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Format/bbs_3mf.hpp"
 
+#include <string>
 #include <vector>
 
 namespace bambu_cli {
@@ -14,6 +15,7 @@ struct ProjectState {
     Slic3r::Model                 model;
     Slic3r::DynamicPrintConfig    project_config;
     Slic3r::PlateDataPtrs         plate_data;   // raw pointers; owned (released in dtor)
+    std::string                   source_path;  // path of the loaded .3mf (for thumbnail passthrough)
 
     ProjectState() = default;
     ~ProjectState();

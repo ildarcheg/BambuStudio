@@ -85,10 +85,13 @@ void assert_plate_thumbnails_128(const std::string& zip_path) {
         if (big_bytes.empty())   FAIL("missing " << big);
         if (small_bytes.empty()) FAIL("missing " << small);
         uint32_t w = 0, h = 0;
+        // Phase B: plate_N.png may be the original source thumbnail at any size;
+        // only require a valid PNG with positive dimensions.
         if (!decode_png_ihdr(big_bytes, w, h))
             FAIL(big << " is not a valid PNG (IHDR missing)");
-        if (w != 128 || h != 128)
-            FAIL(big << " is " << w << "x" << h << ", expected 128x128");
+        if (w == 0 || h == 0)
+            FAIL(big << " has zero dimensions");
+        // plate_N_small.png must always be exactly 128x128.
         if (!decode_png_ihdr(small_bytes, w, h))
             FAIL(small << " is not a valid PNG (IHDR missing)");
         if (w != 128 || h != 128)

@@ -1,5 +1,6 @@
 #include "io.hpp"
 #include "invariant_guard.hpp"
+#include "png_placeholder.hpp"
 
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/Model.hpp"
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -94,6 +96,7 @@ IoResult load_project(const std::string& path, ProjectState& state) {
         return r;
     }
     rebuild_objects_and_instances(state.plate_data, state.model);
+    state.source_path = path;
     r.ok = true;
     return r;
 }
@@ -106,6 +109,110 @@ static void fill_placeholder_thumbnail(Slic3r::ThumbnailData& td) {
     td.height = 128;
     td.pixels.resize(static_cast<size_t>(td.width) * td.height * 4);
     std::memset(td.pixels.data(), 0xC0, td.pixels.size());   // gray RGBA
+}
+
+// --- Thumbnail passthrough (B.2) -------------------------------------------
+// After store_bbs_3mf writes the output archive, replace each plate thumbnail
+// entry:
+//   - If source archive has the matching entry: zero-copy (mz_zip_writer_add_from_zip_reader).
+//   - Otherwise: inject make_placeholder_png_128() as a well-formed PNG.
+//
+// The source entry for plate at position i is looked up by plate_index+1
+// (which equals the plater_id as loaded from the source .3mf). The output
+// entry name is position-based (i+1) to match how store_bbs_3mf names them.
+// For plates whose plate_index was compacted after a remove, the passthrough
+// may fall back to synthesis — acceptable for Phase B scope.
+static bool rewrite_thumbnails(const std::string& archive_path,
+                                const std::string& source_path,
+                                const Slic3r::PlateDataPtrs& plate_data) {
+    // Build map: output entry name -> source candidate entry name
+    std::map<std::string, std::string> passthrough;
+    for (size_t i = 0; i < plate_data.size(); ++i) {
+        const auto* pd = plate_data[i];
+        if (!pd) continue;
+        std::string out_key   = "Metadata/plate_" + std::to_string(i + 1);
+        std::string src_key   = "Metadata/plate_" + std::to_string(pd->plate_index + 1);
+        passthrough[out_key + ".png"]       = src_key + ".png";
+        passthrough[out_key + "_small.png"] = src_key + "_small.png";
+    }
+
+    // Open source archive (optional)
+    mz_zip_archive src_zip;
+    std::memset(&src_zip, 0, sizeof(src_zip));
+    bool has_source = !source_path.empty() && fs::exists(source_path)
+                   && mz_zip_reader_init_file(&src_zip, source_path.c_str(), 0);
+
+    // Build name->index map for source
+    std::map<std::string, mz_uint> src_idx;
+    if (has_source) {
+        mz_uint n = mz_zip_reader_get_num_files(&src_zip);
+        for (mz_uint i = 0; i < n; ++i) {
+            char name[512];
+            mz_zip_reader_get_filename(&src_zip, i, name, sizeof(name));
+            src_idx[name] = i;
+        }
+    }
+
+    // Open the store_bbs_3mf output as reader
+    mz_zip_archive out_zip;
+    std::memset(&out_zip, 0, sizeof(out_zip));
+    if (!mz_zip_reader_init_file(&out_zip, archive_path.c_str(), 0)) {
+        if (has_source) mz_zip_reader_end(&src_zip);
+        return false;
+    }
+
+    // Create rewritten archive
+    const std::string new_path = archive_path + ".pass_tmp";
+    mz_zip_archive new_zip;
+    std::memset(&new_zip, 0, sizeof(new_zip));
+    if (!mz_zip_writer_init_file(&new_zip, new_path.c_str(), 0)) {
+        mz_zip_reader_end(&out_zip);
+        if (has_source) mz_zip_reader_end(&src_zip);
+        return false;
+    }
+
+    // Pre-generate placeholder PNG (used for any synthesized thumbnail)
+    const auto placeholder_png = make_placeholder_png_128();
+
+    bool ok = true;
+    mz_uint n = mz_zip_reader_get_num_files(&out_zip);
+    for (mz_uint i = 0; i < n && ok; ++i) {
+        char name[512];
+        mz_zip_reader_get_filename(&out_zip, i, name, sizeof(name));
+        const std::string entry(name);
+
+        auto pt_it = passthrough.find(entry);
+        if (pt_it != passthrough.end()) {
+            // Plate thumbnail: passthrough from source or synthesize
+            auto src_it = src_idx.find(pt_it->second);
+            if (src_it != src_idx.end()) {
+                ok = !!mz_zip_writer_add_from_zip_reader(&new_zip, &src_zip, src_it->second);
+            } else {
+                ok = !!mz_zip_writer_add_mem(&new_zip, entry.c_str(),
+                                             placeholder_png.data(),
+                                             placeholder_png.size(),
+                                             MZ_NO_COMPRESSION);
+            }
+        } else {
+            // Non-thumbnail entry: zero-copy from output archive
+            ok = !!mz_zip_writer_add_from_zip_reader(&new_zip, &out_zip, i);
+        }
+    }
+
+    if (ok) ok = !!mz_zip_writer_finalize_archive(&new_zip);
+    mz_zip_writer_end(&new_zip);
+    mz_zip_reader_end(&out_zip);
+    if (has_source) mz_zip_reader_end(&src_zip);
+
+    if (!ok) {
+        fs::remove(new_path);
+        return false;
+    }
+
+    boost::system::error_code ec;
+    fs::remove(archive_path, ec);
+    fs::rename(new_path, archive_path);
+    return true;
 }
 
 IoResult save_project(const ProjectState& state, const std::string& out_path) {
@@ -145,6 +252,16 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         fs::remove(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = "store_bbs_3mf returned false for: " + tmp_path;
+        return r;
+    }
+
+    // 3b. Thumbnail passthrough: replace store_bbs_3mf's placeholder-encoded
+    // thumbnails with the original PNG blobs from the source archive (if present),
+    // or with synthesized valid PNGs for newly-added plates.
+    if (!rewrite_thumbnails(tmp_path, state.source_path, state.plate_data)) {
+        fs::remove(tmp_path);
+        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
+        r.error_message = "thumbnail rewrite failed for: " + tmp_path;
         return r;
     }
 
