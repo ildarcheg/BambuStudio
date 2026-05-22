@@ -26,26 +26,13 @@ set(BAMBU_CLI_TEST_SOURCES
     # roundtrip/ is a placeholder for future phases.
 )
 
-add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES}
-    # Include the Http/BBL_Encrypt stubs from src/cli/ so the test binary links.
-    # libslic3r.lib(LogSink.obj) references these symbols; the stubs satisfy
-    # them without pulling in curl or openssl-ssl.
-    ${CMAKE_SOURCE_DIR}/src/cli/stubs_for_libslic3r.cpp
-    # nanosvg_impl.cpp provides nsvgParse/nsvgParseFromFile/nsvgDelete which
-    # libslic3r.lib(NSVGUtils.obj) requires (pulled in transitively by project_ops.cpp
-    # -> bbs_3mf.hpp -> NSVGUtils.hpp).
-    ${CMAKE_SOURCE_DIR}/src/cli/nanosvg_impl.cpp
-    ${CMAKE_SOURCE_DIR}/src/cli/project_ops.cpp
-    ${CMAKE_SOURCE_DIR}/src/cli/io.cpp
-    ${CMAKE_SOURCE_DIR}/src/cli/invariant_guard.cpp
-)
-target_link_libraries(cli_tests PRIVATE test_common libslic3r OpenSSL::Crypto)
-if(WIN32)
-    target_link_libraries(cli_tests PRIVATE bcrypt)
-endif()
+# cli_tests links the bambu_cli_core static library (defined in src/cli/
+# CMakeLists.txt) so production sources compile exactly once. Include paths
+# and transitive link deps (libslic3r, OpenSSL::Crypto, bcrypt, cereal,
+# boost_headeronly) propagate via PUBLIC on bambu_cli_core.
+add_executable(cli_tests ${BAMBU_CLI_TEST_SOURCES})
+target_link_libraries(cli_tests PRIVATE test_common bambu_cli_core)
 target_include_directories(cli_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/cli
     ${CMAKE_CURRENT_SOURCE_DIR}     # for "test_helpers.hpp" / "archive_invariants.hpp" from e2e/ and unit/
 )
 target_compile_definitions(cli_tests PRIVATE

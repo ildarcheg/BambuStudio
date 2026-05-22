@@ -17,9 +17,13 @@ set(BAMBU_CLI_STL_DIR
     CACHE PATH
     "Directory containing 000_01_test_*.stl canonical fixtures")
 
-# --- Sources ---------------------------------------------------------------
-set(BAMBU_CLI_SOURCES
-    main.cpp
+# --- Static library: all CLI code except main() --------------------------
+# Built once and linked by both `bambu-cli` (the executable) and `cli_tests`
+# (the test binary). Sources used to be compiled twice; the lib eliminates
+# that duplication (and the drift it caused).
+#
+# Sibling pattern: matches OrcaSlicer's `orca_cli_core` STATIC target.
+set(BAMBU_CLI_CORE_SOURCES
     stubs_for_libslic3r.cpp
     nanosvg_impl.cpp
     io.cpp
@@ -33,33 +37,41 @@ set(BAMBU_CLI_SOURCES
     commands/config.cpp
 )
 
-# --- Target ---------------------------------------------------------------
-add_executable(bambu-cli ${BAMBU_CLI_SOURCES})
+add_library(bambu_cli_core STATIC ${BAMBU_CLI_CORE_SOURCES})
 
-target_include_directories(bambu-cli PRIVATE
+# PUBLIC so consumers (the exe and the tests) inherit the include paths
+# and link deps transitively.
+target_include_directories(bambu_cli_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/CLI11
     ${CMAKE_SOURCE_DIR}/src         # for <nlohmann/json.hpp> (vendored at src/nlohmann/json.hpp)
 )
 
-# IMPORTED-target Debug/Release mapping insurance (build_environment memory).
-set_target_properties(bambu-cli PROPERTIES
-    MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELEASE
-    MAP_IMPORTED_CONFIG_MINSIZEREL     RELEASE
-)
+target_compile_features(bambu_cli_core PUBLIC cxx_std_17)
 
-target_compile_features(bambu-cli PRIVATE cxx_std_17)
-
-# --- Link ---------------------------------------------------------------
-target_link_libraries(bambu-cli PRIVATE
+target_link_libraries(bambu_cli_core PUBLIC
     libslic3r
     cereal
     boost_headeronly
     OpenSSL::Crypto       # MD5_*
 )
 if(WIN32)
-    target_link_libraries(bambu-cli PRIVATE bcrypt)   # boost::uuids on Windows
+    target_link_libraries(bambu_cli_core PUBLIC bcrypt)   # boost::uuids on Windows
 endif()
+
+# IMPORTED-target Debug/Release mapping insurance (build_environment memory).
+set_target_properties(bambu_cli_core PROPERTIES
+    MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELEASE
+    MAP_IMPORTED_CONFIG_MINSIZEREL     RELEASE
+)
+
+# --- Executable ----------------------------------------------------------
+add_executable(bambu-cli main.cpp)
+target_link_libraries(bambu-cli PRIVATE bambu_cli_core)
+set_target_properties(bambu-cli PROPERTIES
+    MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELEASE
+    MAP_IMPORTED_CONFIG_MINSIZEREL     RELEASE
+)
 
 # --- POST_BUILD DLL copies (Windows) -------------------------------------
 if(WIN32)
