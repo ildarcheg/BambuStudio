@@ -131,26 +131,26 @@ static void get_bed_aabb(const Slic3r::PlateData* pd,
     }
 }
 
-// Compute BBS plate-world origin for a 1-based plate_index.
-// The GUI layout places plates on a stride_x × stride_y grid; stride = bed_dim * 1.2.
-// compute_colum_count logic (from PartPlate.hpp):
-//   cols = round(sqrt(total)); if sqrt > round → cols+1 else cols.
-// For our CLI purposes we only need stride (plate 1 → origin (0,0);
-// plate 2 → (stride_x, 0), etc.). Since we don't know total_plate_count
-// we use a fixed large-enough column count (e.g., ceil(sqrt(plate_index+1))).
-Slic3r::Vec3d plate_world_origin(int plate_index_1based,
+// Compute BBS plate-world origin for a 1-based plate_index in a layout of
+// total_plates plates. The GUI lays plates on a sqrt-grid with stride =
+// bed_dim * 1.2 (GUI_PLATE_GAP_RATIO = 0.2 in PartPlate.cpp). Column count
+// MUST come from the total plate count (PartPlate.cpp:4776 calls
+// compute_colum_count(m_plate_count)) -- deriving cols from
+// plate_index_1based gives wrong x/y for any plate past the first row of
+// a layout with > index plates (e.g. plate 3 in a 5-plate layout sits at
+// col 2 row 0 with cols=ceil(sqrt(5))=3, not col 0 row 1 from cols=2).
+Slic3r::Vec3d plate_world_origin(int plate_index_1based, int total_plates,
                                  double bed_width, double bed_height) {
     // BBS PartPlateList::LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2
     static const double LOGICAL_PART_PLATE_GAP = 0.2;
     double stride_x = bed_width  * (1.0 + LOGICAL_PART_PLATE_GAP);
     double stride_y = bed_height * (1.0 + LOGICAL_PART_PLATE_GAP);
 
-    // Use enough columns for the current plate (conservative estimate).
-    // The empirically-derived formula: cols = compute_colum_count(plate_index_1based)
-    // For simplicity and CLI correctness, compute cols for plate_index_1based plates.
-    float v = std::sqrt(static_cast<float>(plate_index_1based));
-    float rv = std::round(v);
-    int cols = (v > rv) ? static_cast<int>(rv) + 1 : static_cast<int>(rv);
+    // cols = ceil(sqrt(total_plates)) -- mirrors PartPlate.cpp
+    // compute_colum_count and OrcaSlicer src/cli/placement.cpp::
+    // plate_origin_offset.
+    int n = std::max(1, total_plates);
+    int cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(n))));
     if (cols < 1) cols = 1;
 
     int pi = plate_index_1based - 1;   // 0-based
@@ -240,9 +240,13 @@ OpResult add_object_to_plate(ProjectState& state,
     // (bbs_3mf.cpp sets plate_index = plater_id - 1 on load).
     // add_plate() sets plate_index = max_existing_index + 1, so fresh plates
     // are also consistently 0-based: plate 1 → index=0, plate 2 → index=1, etc.
-    // The GUI stride formula uses a 1-based plate number.
+    // The GUI stride formula uses a 1-based plate number. Cols must come
+    // from the total plate count, not from the per-call index -- see the
+    // doc comment on plate_world_origin.
     int plate_number = pd->plate_index + 1;
-    Slic3r::Vec3d plate_origin = plate_world_origin(plate_number, bed_width, bed_height);
+    int total_plates = static_cast<int>(state.plate_data.size());
+    Slic3r::Vec3d plate_origin = plate_world_origin(plate_number, total_plates,
+                                                    bed_width, bed_height);
 
     double plate_bed_minx = bed_minx + plate_origin.x();
     double plate_bed_miny = bed_miny + plate_origin.y();

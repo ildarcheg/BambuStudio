@@ -185,8 +185,16 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name);
 // Plate origin formula in world coordinates, mirroring BBS PartPlateList
 // stride: stride_xy = bed_extent * (1 + LOGICAL_PART_PLATE_GAP) with
 // LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2. Plate 1 (1-based) returns (0,0,0).
+//
+// Column count is derived from <total_plates> (matches the GUI helper
+// PartPlate.cpp:4776 compute_colum_count(m_plate_count)). Deriving cols
+// from plate_index_1based gives wrong x/y for any plate past the first
+// row of a layout with more plates than the index -- e.g. plate 3 in a
+// 5-plate layout. Sibling parity: OrcaSlicer src/cli/placement.cpp::
+// plate_origin_offset uses the same total_plates input.
+//
 // Exposed for unit/regression testing of the multi-plate stride.
-Slic3r::Vec3d plate_world_origin(int plate_index_1based,
+Slic3r::Vec3d plate_world_origin(int plate_index_1based, int total_plates,
                                  double bed_width, double bed_height);
 
 // ---- D2: object merge-parts -----------------------------------------------
