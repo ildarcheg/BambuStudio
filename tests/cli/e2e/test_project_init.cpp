@@ -20,6 +20,8 @@ TEST_CASE("project init: happy path clones committed reference 3mf", "[m1][proje
     INFO("stdout: " << r.stdout_text);
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(out));
+    // Staging file used by the TOCTOU defense must be cleaned up on success.
+    REQUIRE_FALSE(fs::exists(out + ".init-tmp"));
 
     bambu_cli_test::run_all_basic(out);
 
@@ -67,6 +69,9 @@ TEST_CASE("project init: corrupted template (missing plate_1_small.png) -> exit 
     REQUIRE(r.stderr_text.find("invariant_violation") != std::string::npos);
     REQUIRE(r.stderr_text.find("thumbnails") != std::string::npos);
     REQUIRE_FALSE(fs::exists(out));
+    // Staging defense: out path must NEVER hold the unvalidated template bytes,
+    // and the staging file must be cleaned up on validation failure too.
+    REQUIRE_FALSE(fs::exists(out + ".init-tmp"));
 
     fs::remove(corrupted);
 }
