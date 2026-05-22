@@ -92,13 +92,39 @@ static std::vector<Tri> make_cone(float r, float h, int seg) {
     return out;
 }
 
+static std::vector<Tri> make_two_cubes(float s, float offset_x) {
+    // Two non-overlapping cubes along X: cube 1 at origin, cube 2 offset by offset_x.
+    float h = s * 0.5f;
+    Vec3 p0[8] = {
+        {-h,-h,-h}, { h,-h,-h}, { h, h,-h}, {-h, h,-h},
+        {-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h}};
+    float ox = offset_x;
+    Vec3 p1[8] = {
+        {ox-h,-h,-h}, {ox+h,-h,-h}, {ox+h, h,-h}, {ox-h, h,-h},
+        {ox-h,-h, h}, {ox+h,-h, h}, {ox+h, h, h}, {ox-h, h, h}};
+    auto q = [](Vec3* p, int a, int b, int c, int d) -> std::vector<Tri> {
+        return {{p[a], p[b], p[c]}, {p[a], p[c], p[d]}};
+    };
+    std::vector<Tri> out;
+    for (Vec3* pts : {p0, p1}) {
+        for (auto& v : q(pts, 0,1,2,3)) out.push_back(v);   // bottom
+        for (auto& v : q(pts, 4,7,6,5)) out.push_back(v);   // top
+        for (auto& v : q(pts, 0,4,5,1)) out.push_back(v);   // front
+        for (auto& v : q(pts, 2,6,7,3)) out.push_back(v);   // back
+        for (auto& v : q(pts, 0,3,7,4)) out.push_back(v);   // left
+        for (auto& v : q(pts, 1,5,6,2)) out.push_back(v);   // right
+    }
+    return out;
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) { std::fprintf(stderr, "usage: %s <out_dir>\n", argv[0]); return 1; }
     std::string dir = argv[1];
     if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir.push_back('\\');
-    write_stl(dir + "cube.stl",     make_cube(10.0f));
-    write_stl(dir + "cylinder.stl", make_cylinder(5.0f, 10.0f, 32));
-    write_stl(dir + "cone.stl",     make_cone(5.0f, 10.0f, 32));
-    std::printf("Wrote 3 STLs to %s\n", dir.c_str());
+    write_stl(dir + "cube.stl",       make_cube(10.0f));
+    write_stl(dir + "cylinder.stl",   make_cylinder(5.0f, 10.0f, 32));
+    write_stl(dir + "cone.stl",       make_cone(5.0f, 10.0f, 32));
+    write_stl(dir + "two_cubes.stl",  make_two_cubes(10.0f, 30.0f));
+    std::printf("Wrote 4 STLs to %s\n", dir.c_str());
     return 0;
 }
