@@ -444,3 +444,58 @@ CLI surface; purely internal change to `save_project`.
 - **Smoke-gate (Layer 2 / Bambu Studio):** `[ ]` pending user
   verification — open a CLI-produced .3mf; plate thumbnail should
   now show the original source image rather than a gray placeholder.
+
+---
+
+## Phase F — Cleanups (2026-05-22)
+
+Targeted cleanups across three sub-phases. No new CLI surface.
+
+### F.1 — Save-path polish (`864abad7a`)
+
+- **`io.cpp` `fs::remove(bak)` overload fix:** pre-swap stale-.bak
+  cleanup now uses the error_code overload (best-effort) rather than the
+  throwing overload, matching the post-swap remove at line 302. A locked
+  .bak from another process no longer propagates into the outer catch and
+  surfaces as "rename failed:" before the rename even attempted.
+- **`--verbose` no-op:** hidden from `--help` via `group("")` and marked
+  intentional no-op in a comment. Wiring to stage callbacks would require
+  >30 LOC across 5 register functions. Flag is still parsed so existing
+  scripts don't break.
+
+### F.2 — Code organization (`dd0e70886`, `0a5ce5ba0`)
+
+- **All 10 typed exceptions in one file:** `BadCoverImage`, `InvalidField`,
+  `BadAuxFile`, `AuxNameError`, `AuxCollisionError` moved from
+  `project_tab_ops.hpp` to `exceptions.hpp` alongside the 5 Phase A
+  bases. Include chain unchanged (`project_tab_ops.hpp` already includes
+  `exceptions.hpp`).
+- **Doc nit fixed:** comment at `project_tab_ops.hpp:99` now reads
+  `"Auxiliaries/"` (matching the Bambu archive convention) instead of
+  `"Auxiliary/"` (Orca convention).
+- **`find_object_by_name` inlined and deleted:** sole caller in
+  `commands/config.cpp` replaced with `std::any_of`; helper removed from
+  `project_ops.hpp/.cpp`. Associated test and stale comment also removed.
+
+### F.3 — Test coverage gaps (`ba627a119`)
+
+- **Step a added to `merge_object_parts`:** empty `--parts` now throws
+  `std::invalid_argument` before the object-lookup step, making it
+  unit-testable.
+- **7 new fail-fast pairing tests** in `test_project_ops_merge.cpp`:
+  a→b, b→c, c→d, e→f, f→g, g→h, h→i.
+- **2 dedicated step tests** added: non-MODEL_PART source (step f) and
+  empty-mesh source (step g).
+- **Vacuous-skip fixed** in `test_project_ops_config.cpp`: `if (!opt)
+  return` replaced with `REQUIRE(opt != nullptr)` so the M1-unset loop
+  assertion cannot be silently bypassed.
+
+### Summary
+
+| Item | Detail |
+|---|---|
+| Phase F test growth | +9 cases / +37 assertions (208→216 total) |
+| Final suite | **216 cases / 1003 assertions / 0 failures** |
+| F.1 commit | `864abad7a` |
+| F.2 commits | `dd0e70886`, `0a5ce5ba0` |
+| F.3 commit | `ba627a119` |
