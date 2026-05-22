@@ -62,6 +62,24 @@ static void embed_cover(Slic3r::Model& model,
     field_out = archive_entry;
 }
 
+// Cover-image refcount (ported from OrcaSlicer project_tab_ops.hpp:223 /
+// project_tab_ops.cpp::clear_cover_image). The on-disk cover.png is shared
+// by `info.cover_file` and `profile.ProfileCover`; deleting it eagerly on
+// the first clear would orphan the other surface's pointer. Defer the
+// delete until both pointers are empty after the clear.
+static bool info_cover_empty(const Slic3r::Model& model) {
+    return !model.model_info || model.model_info->cover_file.empty();
+}
+static bool profile_cover_empty(const Slic3r::Model& model) {
+    return !model.profile_info || model.profile_info->ProfileCover.empty();
+}
+static void delete_cover_file_if_unreferenced(Slic3r::Model& model) {
+    if (!info_cover_empty(model) || !profile_cover_empty(model)) return;
+    const fs::path landed = fs::path(model.get_auxiliary_file_temp_path()) / "cover.png";
+    boost::system::error_code ec;
+    fs::remove(landed, ec);  // best-effort; absent file is a no-op
+}
+
 static void validate_fields(const std::vector<std::string>& fields,
                              const std::set<std::string>& allowed) {
     for (const auto& f : fields) {
@@ -107,13 +125,15 @@ std::string info_clear(ProjectState& state, const std::vector<std::string>& fiel
     validate_fields(fields, allowed_info_fields());
     auto& mi = ensure_model_info(state.model);
     int n = 0;
+    bool cleared_cover = false;
     for (const auto& f : fields) {
         if (f == "title")       { mi.model_name  = ""; ++n; }
         else if (f == "description") { mi.description = ""; ++n; }
         else if (f == "license")     { mi.license     = ""; ++n; }
         else if (f == "copyright")   { mi.copyright   = ""; ++n; }
-        else if (f == "cover")       { mi.cover_file  = ""; ++n; }
+        else if (f == "cover")       { mi.cover_file  = ""; ++n; cleared_cover = true; }
     }
+    if (cleared_cover) delete_cover_file_if_unreferenced(state.model);
     return "cleared " + std::to_string(n) + " field(s)";
 }
 
@@ -154,11 +174,13 @@ std::string profile_clear(ProjectState& state, const std::vector<std::string>& f
     validate_fields(fields, allowed_profile_fields());
     auto& pi = ensure_profile_info(state.model);
     int n = 0;
+    bool cleared_cover = false;
     for (const auto& f : fields) {
         if (f == "title")       { pi.ProfileTile        = ""; ++n; }
         else if (f == "description") { pi.ProfileDescription = ""; ++n; }
-        else if (f == "cover")       { pi.ProfileCover       = ""; ++n; }
+        else if (f == "cover")       { pi.ProfileCover       = ""; ++n; cleared_cover = true; }
     }
+    if (cleared_cover) delete_cover_file_if_unreferenced(state.model);
     return "cleared " + std::to_string(n) + " field(s)";
 }
 

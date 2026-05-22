@@ -158,3 +158,83 @@ TEST_CASE("allowed_info_fields: contains exactly the 5 clearable fields",
     REQUIRE(f.count("origin")      == 0);  // read-only, not clearable
     REQUIRE(f.size() == 5);
 }
+
+// ---- cover-image refcount --------------------------------------------------
+// info and profile share the on-disk file <aux>/cover.png. Clearing one
+// surface must leave the file in place while the other surface still
+// references it; clearing the second must remove the file.
+// (Ported from OrcaSlicer cross-project audit -- 2026-05-22.)
+
+TEST_CASE("cover refcount: profile clear leaves file when info still references it",
+          "[unit][cover_refcount]") {
+    REQUIRE(fs::exists(kPng));
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    // Set both surfaces to point at the same embedded file.
+    bambu_cli::InfoSetParams ip; ip.cover_path = kPng;
+    bambu_cli::ProfileSetParams pp; pp.cover_path = kPng;
+    REQUIRE_NOTHROW(bambu_cli::info_set(s, ip));
+    REQUIRE_NOTHROW(bambu_cli::profile_set(s, pp));
+
+    const fs::path landed = fs::path(s.model.get_auxiliary_file_temp_path()) / "cover.png";
+    REQUIRE(fs::exists(landed));
+
+    // Clearing profile alone keeps the file (info still references it).
+    REQUIRE_NOTHROW(bambu_cli::profile_clear(s, {"cover"}));
+    REQUIRE(s.model.profile_info->ProfileCover.empty());
+    REQUIRE_FALSE(s.model.model_info->cover_file.empty());
+    REQUIRE(fs::exists(landed));
+
+    // Clearing info now drops the last reference -> file deleted.
+    REQUIRE_NOTHROW(bambu_cli::info_clear(s, {"cover"}));
+    REQUIRE(s.model.model_info->cover_file.empty());
+    REQUIRE_FALSE(fs::exists(landed));
+}
+
+TEST_CASE("cover refcount: info clear leaves file when profile still references it",
+          "[unit][cover_refcount]") {
+    REQUIRE(fs::exists(kPng));
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    bambu_cli::InfoSetParams ip; ip.cover_path = kPng;
+    bambu_cli::ProfileSetParams pp; pp.cover_path = kPng;
+    REQUIRE_NOTHROW(bambu_cli::info_set(s, ip));
+    REQUIRE_NOTHROW(bambu_cli::profile_set(s, pp));
+
+    const fs::path landed = fs::path(s.model.get_auxiliary_file_temp_path()) / "cover.png";
+    REQUIRE(fs::exists(landed));
+
+    REQUIRE_NOTHROW(bambu_cli::info_clear(s, {"cover"}));
+    REQUIRE(fs::exists(landed));
+
+    REQUIRE_NOTHROW(bambu_cli::profile_clear(s, {"cover"}));
+    REQUIRE_FALSE(fs::exists(landed));
+}
+
+TEST_CASE("cover refcount: clearing only surface deletes file immediately",
+          "[unit][cover_refcount]") {
+    REQUIRE(fs::exists(kPng));
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    bambu_cli::InfoSetParams ip; ip.cover_path = kPng;
+    REQUIRE_NOTHROW(bambu_cli::info_set(s, ip));
+
+    const fs::path landed = fs::path(s.model.get_auxiliary_file_temp_path()) / "cover.png";
+    REQUIRE(fs::exists(landed));
+
+    // profile_info has no cover -> info_clear should drop the file.
+    REQUIRE_NOTHROW(bambu_cli::info_clear(s, {"cover"}));
+    REQUIRE_FALSE(fs::exists(landed));
+}
+
+TEST_CASE("cover refcount: clearing an already-empty cover is a no-op",
+          "[unit][cover_refcount]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    // No cover set; clear should not throw and should not create/delete anything.
+    REQUIRE_NOTHROW(bambu_cli::info_clear(s, {"cover"}));
+    REQUIRE_NOTHROW(bambu_cli::profile_clear(s, {"cover"}));
+}
