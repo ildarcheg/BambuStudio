@@ -348,3 +348,55 @@ Windows-safe aux-name sanitizer. All verbs use the Phase-A architecture
 | C.3 commit | `c8186e0ac` |
 
 - **Smoke-gate (Layer 2 / Bambu Studio):** `[ ]` pending user verification.
+
+---
+
+## Phase D — split / merge (2026-05-22)
+
+Two new leaf verbs on `object`. Both use the Phase A architecture
+(run_mutation / typed exceptions / static lib). Both use first-match
+semantics on `--name` (not group-by-name) — splitting or merging across
+a clone-group is ambiguous; deferred per Orca CLI report §10.
+
+### Sub-phases
+
+- **(D.0) Multi-component STL fixture** — `d3621a33c`. Added
+  `tests/cli/fixtures/stls/two_cubes.stl` (two 10 mm cubes offset 30 mm
+  along X, exactly 1284 bytes binary STL, 24 triangles). Extended
+  `tests/cli/fixtures/gen_fixtures.cpp` with `make_two_cubes()`.
+
+- **(D.1) `object split-to-parts`** — `0f85e20bd`. Delegates to
+  `ModelVolume::split(filament_count)`. Validates: exactly 1 volume,
+  must be `MODEL_PART`. Captures `source.input_file` before split (split
+  resets it on the first resulting volume); re-stamps all volumes
+  after. `std::invalid_argument` remapped to exit 7 (`invalid_state`)
+  via `MutationExceptionMap` override. Text output:
+  `split-to-parts: <name> -> <K> parts.` Tests: +9 cases / +37
+  assertions.
+
+- **(D.2) `object merge-parts`** — `a541471ae`. 8-step deterministic
+  validation (fail-fast order: object-lookup → part-lookup → into-
+  collision → filament-range → MODEL_PART-check → empty-mesh-check →
+  filament-agreement → non-extruder-config-key). Execution: bakes each
+  source's `get_matrix()` transform into a `TriangleMesh` copy, merges
+  via `TriangleMesh::merge`, calls `add_volume(mesh, false)` to bypass
+  bbox-center shift, places result at lowest-source-index slot via
+  `std::rotate`, deletes sources in reverse-index order. Single-volume
+  serialization shim: if only 1 volume remains after merge, extruder is
+  also written to `obj.config` (BBS strips it from volume-level config
+  at save time). Tests: +19 cases / +95 assertions.
+
+### Summary
+
+| Item | Detail |
+|---|---|
+| New leaf verbs | 2 (`object split-to-parts`, `object merge-parts`) |
+| New fixture | `two_cubes.stl` (1284 bytes, 2 disconnected 10 mm cubes) |
+| New source files | `tests/cli/unit/test_project_ops_{split,merge}.cpp`, `tests/cli/e2e/test_object_{split,merge}.cpp` |
+| Phase D test growth | +28 cases / +132 assertions (171→199 total) |
+| Final suite | **199 cases / 890 assertions / 0 failures** |
+| D.0 commit | `d3621a33c` |
+| D.1 commit | `0f85e20bd` |
+| D.2 commit | `a541471ae` |
+
+- **Smoke-gate (Layer 2 / Bambu Studio):** `[ ]` pending user verification.
