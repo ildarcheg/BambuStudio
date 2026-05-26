@@ -8,6 +8,16 @@
 
 **Tech Stack:** C++17, libslic3r, Catch2 v2.x, boost::filesystem, miniz (mz_zip), CLI11, nlohmann::json. Spec: `docs/superpowers/specs/2026-05-26-canonical-aux-layout-design.md`.
 
+**Build environment (Windows; required priming before any cmake/build call this session):**
+```powershell
+$vsCmakeBin = "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+$env:Path = "$vsCmakeBin;C:\Strawberry\perl\bin;C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;" + $env:Path
+$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+$env:CMAKE_GENERATOR = "Visual Studio 16 2019"
+$env:CMAKE_GENERATOR_PLATFORM = "x64"
+```
+Without this, the system PATH's CMake 4.x is selected and the regeneration step fails (the repo's `CMakeLists.txt:4-6` rejects CMake >= 4.0 on Windows). All `cmake --build` invocations in this plan use `--config Release --parallel 2`; the test executable lives at `build/tests/cli/Release/cli_tests.exe` and the CLI binary at `build/src/cli/Release/bambu-cli.exe`. (RelWithDebInfo is broken on this tree per `memory/build_environment.md` — IMPORTED Debug/Release mapping bugs in BambuStudio's own CMakeLists; cli_tests has the `MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELEASE` insurance, but the larger libslic3r/bambu-cli link path doesn't.)
+
 **Pre-conditions verified during plan creation (2026-05-26):**
 - `tests/cli/fixtures/cover_smoke.png` and `cover_smoke.jpg` already exist, are git-tracked, and have valid magic bytes (`89 50 4E 47 0D 0A 1A 0A` / `FF D8 FF E0`). Tasks 3 and 4 use them; no creation step needed.
 - Committed `.3mf` fixtures (`tests/cli/fixtures/reference.3mf`, `tests/cli/fixtures/local/temp_project_for_bambu_studio.3mf`) contain no `Auxiliaries/*` entries — the new `check_auxiliary_passthrough` guard (Task 7) will pass vacuously for them. No fixture regeneration required.
@@ -166,8 +176,8 @@ Edit `tests/cli/CMakeLists.txt`. In `BAMBU_CLI_TEST_SOURCES`, find the existing 
 
 Build, then:
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[image_signature]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[image_signature]"
 ```
 Expected: build fails — `bambu_cli::detail::is_png_or_jpeg` not declared.
 
@@ -210,8 +220,8 @@ bool is_png_or_jpeg(const std::string& path) {
 - [ ] **Step 6: Run test to verify it passes**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[image_signature]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[image_signature]"
 ```
 Expected: 8 assertions, all PASS.
 
@@ -438,8 +448,8 @@ For each hit, rewrite to the canonical names. If no hits, nothing to do.
 - [ ] **Step 10: Build and run all tests**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe
 ```
 Expected: build succeeds; `[aux_folder_names]` passes; the new `aux_list` ProfilePictures case passes; existing aux ops + roundtrip tests pass. The cover plumbing has not been touched yet, so `[unit][c3]` cover tests still pass with their current expectations (they will be updated in Task 3 when the cover decoupling lands).
 
@@ -629,8 +639,8 @@ In `tests/cli/CMakeLists.txt`, insert into `BAMBU_CLI_TEST_SOURCES` immediately 
 - [ ] **Step 4: Run test to verify it fails**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[cover_decouple]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[cover_decouple]"
 ```
 Expected: the JPEG case fails (old code rejects non-PNG) and the decouple assertions fail (old code lands ProfileCover in Model Pictures with basename `cover.png`).
 
@@ -785,9 +795,9 @@ Open `tests/cli/unit/test_project_profile_ops.cpp`. For every test that exercise
 - [ ] **Step 10: Build and run cover tests**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[cover_decouple]"
-build/tests/RelWithDebInfo/cli_tests.exe "[unit]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[cover_decouple]"
+build/tests/cli/Release/cli_tests.exe "[unit]"
 ```
 Expected: all green.
 
@@ -895,8 +905,8 @@ In `tests/cli/CMakeLists.txt`, insert into `BAMBU_CLI_TEST_SOURCES` immediately 
 
 The ops layer already handles the trusting `cover_name` contract after Task 3:
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[cover_name]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[cover_name]"
 ```
 Expected: 3 sections, all PASS.
 
@@ -1089,18 +1099,18 @@ TEST_CASE("profile set: --cover-name with path separator fails with exit 1",
 - [ ] **Step 7: Build the CLI binary + sanity-check help text**
 
 ```
-cmake --build build --target bambu-cli --config RelWithDebInfo
-build/RelWithDebInfo/bambu-cli.exe project info set --help
-build/RelWithDebInfo/bambu-cli.exe project profile set --help
+cmake --build build --target bambu-cli --config Release --parallel 2
+build/src/cli/Release/bambu-cli.exe project info set --help
+build/src/cli/Release/bambu-cli.exe project profile set --help
 ```
 Expected: both `--cover` and `--cover-name` listed in help with their new descriptions.
 
 - [ ] **Step 8: Run all tests**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[cover_name]"
-build/tests/RelWithDebInfo/cli_tests.exe
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[cover_name]"
+build/tests/cli/Release/cli_tests.exe
 ```
 Expected: unit `[cover_name]` 3 sections green; e2e `[cover_name]` 4 sections green; full suite green.
 
@@ -1224,7 +1234,7 @@ Register in `tests/cli/CMakeLists.txt` immediately after `unit/test_cover_pick_b
 - [ ] **Step 2: Run test to verify it fails (compile error)**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
+cmake --build build --target cli_tests --config Release --parallel 2
 ```
 Expected: build fails — `bambu_cli::check_auxiliary_passthrough` not declared.
 
@@ -1322,8 +1332,8 @@ bool check_auxiliary_passthrough(const std::string& pre_path,
 - [ ] **Step 5: Run test to verify it passes**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[invariant_aux]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[invariant_aux]"
 ```
 Expected: 5 sections, all PASS.
 
@@ -1452,7 +1462,7 @@ Register in `tests/cli/CMakeLists.txt` immediately after `unit/test_invariant_au
 - [ ] **Step 2: Run test to verify it fails (compile error)**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
+cmake --build build --target cli_tests --config Release --parallel 2
 ```
 Expected: build fails — `check_cover_references_resolve` not declared.
 
@@ -1540,8 +1550,8 @@ bool check_cover_references_resolve(const std::string& archive_path,
 - [ ] **Step 5: Run test**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe "[invariant_covref]"
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe "[invariant_covref]"
 ```
 Expected: 4 sections, all PASS.
 
@@ -1621,8 +1631,8 @@ In `src/cli/invariant_guard.cpp`, find `run_guard(...)`. After the three existin
 - [ ] **Step 3: Build and run the entire test suite**
 
 ```
-cmake --build build --target cli_tests --config RelWithDebInfo
-build/tests/RelWithDebInfo/cli_tests.exe
+cmake --build build --target cli_tests --config Release --parallel 2
+build/tests/cli/Release/cli_tests.exe
 ```
 Expected: all green. Per pre-conditions (plan header): no committed `.3mf` fixture contains `Auxiliaries/*` entries, so `auxiliary_passthrough` passes vacuously for the existing roundtrip suite.
 
@@ -1767,14 +1777,14 @@ TEST_CASE("test_reference.3mf round-trip preserves canonical aux layout",
 
 ```
 cmake -B build -S .
-cmake --build build --target cli_tests --config RelWithDebInfo
+cmake --build build --target cli_tests --config Release --parallel 2
 ```
 Expected: build succeeds.
 
 - [ ] **Step 6: Run the round-trip test**
 
 ```
-build/tests/RelWithDebInfo/cli_tests.exe "[reference_passthrough]"
+build/tests/cli/Release/cli_tests.exe "[reference_passthrough]"
 ```
 Expected: PASS. If it fails:
 - "missing in post: Auxiliaries/Profile Pictures/..." → Task 3 cover plumbing isn't writing the right folder. Investigate `profile_set`.
@@ -1784,7 +1794,7 @@ Expected: PASS. If it fails:
 - [ ] **Step 7: Run the full suite to confirm nothing regressed**
 
 ```
-build/tests/RelWithDebInfo/cli_tests.exe
+build/tests/cli/Release/cli_tests.exe
 ```
 Expected: all green. The new tests should bring the count above the prior baseline of 235 cases / 1170 assertions.
 
