@@ -9,14 +9,19 @@
 The CLI's aux-folder layout diverges from canonical Bambu Studio output in
 three concrete ways, confirmed by inspecting `test_reference.3mf`:
 
-| Surface | CLI today (`src/cli/project_tab_ops.cpp:212-220`) | Bambu canonical (`src/slic3r/GUI/Auxiliary.hpp:75`, `Project.cpp:214-226`) |
+| Surface | CLI today | Bambu canonical (`src/slic3r/GUI/Auxiliary.hpp:75`, `Project.cpp:214-226`) |
 |---|---|---|
-| Folder for DesignerCover + model preview images | `Pictures` | `Model Pictures` |
-| Folder for profile preview images | *(none)* | `Profile Pictures` |
-| Folder for ProfileCover | `Pictures` (shared with DesignerCover via refcount on `cover.png`) | `Profile Pictures` (its own basename) |
-| Folder for BOM docs | `Bom` | `Bill of Materials` |
-| Folder for assembly-guide PDFs | `AssemblyGuide` | `Assembly Guide` |
-| Cover image format | PNG only (signature-checked) | PNG or JPEG (reference file uses `.jpg`) |
+| Generic aux folder name — model previews (`aux add --folder pictures`) | `Pictures` (`project_tab_ops.cpp::folder_subdir`) | `Model Pictures` |
+| Generic aux folder name — profile previews | *(none — no enum variant)* | `Profile Pictures` |
+| Generic aux folder name — BOM docs (`aux add --folder bom`) | `Bom` | `Bill of Materials` |
+| Generic aux folder name — assembly guide (`aux add --folder assembly-guide`) | `AssemblyGuide` | `Assembly Guide` |
+| Embed target for `info set --cover` (DesignerCover) | `Model Pictures/cover.png` — already canonical folder, but forced filename and shared on-disk file (see next row) | `Model Pictures/<basename>` |
+| Embed target for `profile set --cover` (ProfileCover) | `Model Pictures/cover.png` — wrong folder AND shared with DesignerCover via a refcount in `project_tab_ops.cpp::delete_cover_file_if_unreferenced` | `Profile Pictures/<basename>` |
+| Cover image format | PNG only (`check_png_signature`) | PNG or JPEG (reference file uses `.jpg`) |
+
+Two distinct bugs, not one:
+1. The generic `aux add --folder ...` code path uses the wrong subdir names (`Pictures`/`Bom`/`AssemblyGuide`) — purely a string-table issue in `folder_subdir`.
+2. The cover-specific embed path in `embed_cover` lands the DesignerCover file in the correct folder (`Model Pictures/`) but forces filename `cover.png` and shares that single on-disk file with ProfileCover via a refcount. The ProfileCover should be in `Profile Pictures/<basename>` and entirely independent.
 
 The reference file's `3D/3dmodel.model` carries `DesignerCover="50calpellet.jpg"`
 (filename only, from `Auxiliaries/Model Pictures/`) and
@@ -86,12 +91,33 @@ error). The CLI is pre-release; no alias compatibility layer.
   Copied to `Model Pictures/<basename>`. Sets
   `model_info.cover_file = "<basename>"`.
 - `--cover-name NAME` — select an image already present in `Model Pictures/`
-  as the cover. `NAME` is run through `sanitize_aux_name` (rejects path
-  separators, leading/trailing whitespace, empty, dot-only, Windows
-  reserved names — same rules as `aux add --name`). Sets
-  `model_info.cover_file = "<NAME>"`. If `Model Pictures/<NAME>` does not
-  exist in the aux temp dir → exit 6 (`aux entry not found: <NAME>`).
+  as the cover. Sets `model_info.cover_file = "<NAME>"`. If
+  `Model Pictures/<NAME>` does not exist in the aux temp dir → exit 6
+  (`aux entry not found: <NAME>`).
 - Passing both `--cover` and `--cover-name` → exit 1 (usage error).
+
+**Layering of the new validations.** The ops layer (`info_set` /
+`profile_set` in `project_tab_ops.cpp`) deliberately does NOT enforce
+mutual-exclusion or run `sanitize_aux_name` on `cover_name` itself —
+those are pre-conditions enforced one layer up, in the CLI command
+callbacks (`commands/project_tab.cpp::register_info` /
+`register_profile`). Rationale: exit codes belong to the CLI surface;
+the ops layer signals failure via C++ exceptions and doesn't know about
+`ExitCode::usage_error`. The CLI layer:
+
+- Rejects `--cover` + `--cover-name` together via
+  `emit_error(mode, "usage_error", "--cover and --cover-name are mutually exclusive")`
+  + `std::exit(to_int(ExitCode::usage_error))` (exit 1).
+- Runs `sanitize_aux_name` on the user-supplied `--cover-name` value
+  before assigning it to `InfoSetParams::cover_name`; on
+  `AuxNameError`, emits a usage error and exits 1.
+
+The ops-layer contract for `info_set` / `profile_set` is then
+"at most one of `cover_path`/`cover_name` is set, and if `cover_name`
+is set the value has already been sanitized." A `require_image_in_folder`
+miss still throws `std::out_of_range`, which `run_mutation` maps to
+exit 6 (`ExitCode::unknown_reference`) — that mapping pre-exists in
+`src/cli/commands/mutation_runner.hpp`.
 
 `project profile set` gains the same pair, targeting `Profile Pictures/` and
 `profile_info.ProfileCover`.
@@ -133,21 +159,28 @@ folders.
 
 ### 4.2 `info_set` / `profile_set` rewiring
 
+The ops layer assumes the CLI has already validated mutual-exclusion and
+sanitized `cover_name`. If both fields are set, `cover_path` wins (an
+intentional no-op of the assumed-invalid combination — the CLI prevents
+it from reaching here in practice).
+
 ```cpp
 // info_set:
-if (p.cover_path && p.cover_name) throw UsageError(...);
 if (p.cover_path) {
     mi.cover_file = embed_image_into_folder(state.model,
                                             AuxFolder::ModelPictures,
                                             *p.cover_path);
 } else if (p.cover_name) {
-    require_image_in_folder(state.model, AuxFolder::ModelPictures, *p.cover_name);
+    require_image_in_folder(state.model,
+                            AuxFolder::ModelPictures,
+                            *p.cover_name);
     mi.cover_file = *p.cover_name;
 }
 ```
 
 `profile_set` is the structural mirror, targeting `AuxFolder::ProfilePictures`
-and `pi.ProfileCover`.
+and `pi.ProfileCover`. The mutual-exclusion + `sanitize_aux_name` checks live
+in `commands/project_tab.cpp::register_info` / `register_profile` (see §3.3).
 
 ### 4.3 Image signature check
 

@@ -1,12 +1,17 @@
 # Canonical Aux Folder Layout — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Align CLI aux folder names with Bambu Studio canonical (`Model Pictures`, `Profile Pictures`, `Bill of Materials`, `Assembly Guide`, `Others`); decouple `DesignerCover` from `ProfileCover` (own folders, own basenames, no shared file); accept JPEG in addition to PNG; add `--cover-name` to pick an existing image; gate the result with two new invariant guards and a round-trip test against `test_reference.3mf`.
 
-**Architecture:** Touch points are concentrated in `src/cli/project_tab_ops.{hpp,cpp}` (enum + cover helpers), `src/cli/commands/project_tab.cpp` (CLI flag wiring), `src/cli/invariant_guard.{hpp,cpp}` + `src/cli/io.cpp` (post-save checks). Existing module boundaries are preserved. The CLI is pre-release: no alias compatibility for old flag values.
+**Architecture:** Touch points are concentrated in `src/cli/project_tab_ops.{hpp,cpp}` (enum + cover helpers), `src/cli/commands/project_tab.cpp` (CLI flag wiring + mutual-exclusion + name sanitization at the user-facing layer), `src/cli/invariant_guard.{hpp,cpp}` + `src/cli/io.cpp` (post-save checks). Existing module boundaries are preserved. The CLI is pre-release: no alias compatibility for old flag values.
 
 **Tech Stack:** C++17, libslic3r, Catch2 v2.x, boost::filesystem, miniz (mz_zip), CLI11, nlohmann::json. Spec: `docs/superpowers/specs/2026-05-26-canonical-aux-layout-design.md`.
+
+**Pre-conditions verified during plan creation (2026-05-26):**
+- `tests/cli/fixtures/cover_smoke.png` and `cover_smoke.jpg` already exist, are git-tracked, and have valid magic bytes (`89 50 4E 47 0D 0A 1A 0A` / `FF D8 FF E0`). Tasks 3 and 4 use them; no creation step needed.
+- Committed `.3mf` fixtures (`tests/cli/fixtures/reference.3mf`, `tests/cli/fixtures/local/temp_project_for_bambu_studio.3mf`) contain no `Auxiliaries/*` entries — the new `check_auxiliary_passthrough` guard (Task 7) will pass vacuously for them. No fixture regeneration required.
+- `store_bbs_3mf` (`src/libslic3r/Format/bbs_3mf.cpp:6977-7003`) serializes `model_info.cover_file` and `profile_info.ProfileCover` verbatim (no prefix added/stripped). The plan's `embed_image_into_folder` returns a basename and assigning it to those fields produces the basename-only metadata the reference file uses.
 
 ---
 
@@ -15,20 +20,22 @@
 **Source files modified:**
 - `src/cli/project_tab_ops.hpp` — enum + struct fields
 - `src/cli/project_tab_ops.cpp` — enum strings, cover helpers, info/profile_set rewiring
-- `src/cli/commands/project_tab.cpp` — `--cover-name` option, mutual-exclusion check, `parse_folder` updates
+- `src/cli/commands/project_tab.cpp` — `--cover-name` option, mutual-exclusion + sanitize at CLI layer, `parse_folder` updates
 - `src/cli/invariant_guard.hpp` — new check declarations + `GuardResult.failed_check` extension
 - `src/cli/invariant_guard.cpp` — new check implementations + `run_guard` extension
-- `src/cli/io.cpp` — pass `source_path` through to `run_guard` (already in `ProjectState`; nothing to wire)
 
 **Tests modified:**
-- `tests/cli/unit/test_project_aux_ops.cpp` (enum name updates)
+- `tests/cli/unit/test_project_aux_ops.cpp` (enum name updates + new ProfilePictures aux_list case)
 - `tests/cli/unit/test_project_info_ops.cpp` (cover decoupling)
 - `tests/cli/unit/test_project_profile_ops.cpp` (cover decoupling)
 - `tests/cli/roundtrip/test_project_tab.cpp` (enum name updates)
+- `tests/cli/e2e/test_project_info.cpp` (new --cover-name exit-code cases)
+- `tests/cli/e2e/test_project_profile.cpp` (new --cover-name exit-code cases)
 - `tests/cli/CMakeLists.txt` (register new test files + new fixture macro)
 
 **Tests created:**
 - `tests/cli/unit/test_image_signature.cpp`
+- `tests/cli/unit/test_aux_folder_canonical_names.cpp`
 - `tests/cli/unit/test_cover_decoupling.cpp`
 - `tests/cli/unit/test_cover_pick_by_name.cpp`
 - `tests/cli/unit/test_invariant_aux_passthrough.cpp`
@@ -37,7 +44,7 @@
 - `tests/cli/fixtures/test_reference.3mf` (binary fixture)
 
 **Docs modified:**
-- `CLAUDE.md` (remove inaccurate aux-folder divergence note)
+- `CLAUDE.md` (correct aux-folder divergence note)
 - `docs/cli/status.md` (add Phase G entry)
 
 **Docs created:**
@@ -48,12 +55,12 @@
 ## Task 1: Image signature validator
 
 **Files:**
-- Modify: `src/cli/project_tab_ops.cpp` (add static helper)
+- Modify: `src/cli/project_tab_ops.hpp`
+- Modify: `src/cli/project_tab_ops.cpp`
 - Create: `tests/cli/unit/test_image_signature.cpp`
-- Modify: `tests/cli/CMakeLists.txt` (register new test)
-- Modify: `src/cli/project_tab_ops.hpp` (expose helper for tests via internal-detail header — see Step 1 note)
+- Modify: `tests/cli/CMakeLists.txt`
 
-The current `check_png_signature` is a file-internal static. We want the new `is_png_or_jpeg` callable from a test. The cleanest way is to expose it as a free function in the `bambu_cli::detail` namespace declared in `project_tab_ops.hpp`. (Alternative — keep static and test indirectly via `info_set --cover`. Rejected: slower iteration and signature edge cases are easier to test directly.)
+The current `check_png_signature` is a file-internal static. The new `is_png_or_jpeg` needs to be callable from a test, so we expose it as a free function in the `bambu_cli::detail` namespace declared in `project_tab_ops.hpp`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -89,9 +96,8 @@ TEST_CASE("is_png_or_jpeg: accepts PNG signature",
     fs::remove(path);
 }
 
-TEST_CASE("is_png_or_jpeg: accepts JPEG SOI marker",
+TEST_CASE("is_png_or_jpeg: accepts JPEG SOI marker (JFIF)",
           "[unit][image_signature]") {
-    // Standard JPEG/JFIF: FF D8 FF E0 ... (also accept FF D8 FF E1 for EXIF).
     const std::vector<uint8_t> jpeg = {
         0xFF,0xD8,0xFF,0xE0, 0x00,0x10,'J','F','I','F'
     };
@@ -157,7 +163,7 @@ Expected: build fails — `bambu_cli::detail::is_png_or_jpeg` not declared.
 
 - [ ] **Step 3: Add the `detail` namespace + declaration to `project_tab_ops.hpp`**
 
-At the end of `src/cli/project_tab_ops.hpp` (before `} // namespace bambu_cli`):
+In `src/cli/project_tab_ops.hpp`, find the closing `} // namespace bambu_cli` at the bottom of the file. Immediately before it, insert:
 
 ```cpp
 namespace detail {
@@ -170,7 +176,7 @@ namespace detail {
 
 - [ ] **Step 4: Implement `is_png_or_jpeg` in `project_tab_ops.cpp`**
 
-Add near the existing `check_png_signature` (which we will remove in a later step — for now both coexist):
+In `src/cli/project_tab_ops.cpp`, find the existing `check_png_signature` static helper (it begins with `static const uint8_t kPngSignature[8]` and `static bool check_png_signature`). Immediately below the `check_png_signature` function body, add:
 
 ```cpp
 namespace detail {
@@ -189,9 +195,11 @@ bool is_png_or_jpeg(const std::string& path) {
 } // namespace detail
 ```
 
+`check_png_signature` itself stays for now; it is removed in Task 3.
+
 - [ ] **Step 5: Register the test in CMake**
 
-Edit `tests/cli/CMakeLists.txt`. Insert into `BAMBU_CLI_TEST_SOURCES` after `unit/test_png_placeholder.cpp` (line 37):
+Edit `tests/cli/CMakeLists.txt`. In `BAMBU_CLI_TEST_SOURCES`, find the existing line `unit/test_png_placeholder.cpp` and insert directly after it:
 
 ```cmake
     unit/test_image_signature.cpp
@@ -214,20 +222,27 @@ git commit -m "feat(cli): add is_png_or_jpeg signature helper
 
 Pre-work for accepting JPEG covers alongside PNG. The existing
 check_png_signature stays for now; will be removed when info_set/
-profile_set switch over in a later task."
+profile_set switch over in Task 3."
 ```
 
 ---
 
-## Task 2: Pin canonical aux folder names with a new unit test (red phase)
+## Task 2: Rename AuxFolder enum + add ProfilePictures + pin canonical names
 
 **Files:**
+- Modify: `src/cli/project_tab_ops.hpp`
+- Modify: `src/cli/project_tab_ops.cpp`
+- Modify: `src/cli/commands/project_tab.cpp`
+- Modify: `tests/cli/unit/test_project_aux_ops.cpp`
+- Modify: `tests/cli/roundtrip/test_project_tab.cpp`
+- Modify: `tests/cli/unit/test_project_info_ops.cpp` (if it references AuxFolder)
+- Modify: `tests/cli/unit/test_project_profile_ops.cpp` (if it references AuxFolder)
 - Create: `tests/cli/unit/test_aux_folder_canonical_names.cpp`
 - Modify: `tests/cli/CMakeLists.txt`
 
-This task is intentionally red until Task 3 lands the enum rename + new variant. We pin the expected canonical strings first.
+This task is a single atomic refactor: rename the enum, add the new variant, update every callsite, update every test that references the old names, and add a new canonical-names test. The whole tree must compile + tests pass before we commit. (Earlier draft split this across two tasks, leaving an uncompilable working tree between them — bad for subagent-driven execution.)
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the new canonical-names test**
 
 Create `tests/cli/unit/test_aux_folder_canonical_names.cpp`:
 
@@ -274,54 +289,14 @@ TEST_CASE("AuxFolder: canonical JSON keys",
 }
 ```
 
-- [ ] **Step 2: Register in CMake**
-
-Edit `tests/cli/CMakeLists.txt`. Insert into `BAMBU_CLI_TEST_SOURCES` immediately after `unit/test_image_signature.cpp`:
-
+Register in `tests/cli/CMakeLists.txt` immediately after `unit/test_image_signature.cpp`:
 ```cmake
     unit/test_aux_folder_canonical_names.cpp
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Update the enum definition in the header**
 
-```
-cmake --build build --target cli_tests --config RelWithDebInfo
-```
-Expected: compile fails — `AuxFolder::ModelPictures`, `ProfilePictures`, `BillOfMaterials` do not exist.
-
-- [ ] **Step 4: Do NOT commit yet**
-
-This test is red on purpose; the rename happens in Task 3 and we want the two to land together so the tree never compiles broken on `master`. Leave the file in the working tree.
-
----
-
-## Task 3: Rename AuxFolder enum + add ProfilePictures variant + update all callsites and existing tests
-
-**Files:**
-- Modify: `src/cli/project_tab_ops.hpp`
-- Modify: `src/cli/project_tab_ops.cpp`
-- Modify: `src/cli/commands/project_tab.cpp` (parse_folder + help strings)
-- Modify: `tests/cli/unit/test_project_aux_ops.cpp` (enum references)
-- Modify: `tests/cli/roundtrip/test_project_tab.cpp:63,114` (enum references)
-- Modify: `tests/cli/unit/test_project_info_ops.cpp` (any AuxFolder use)
-- Modify: `tests/cli/unit/test_project_profile_ops.cpp` (any AuxFolder use)
-
-Mechanical rename, but in one task because the enum is the type — we cannot land a partial rename. Tasks 4+ build on this.
-
-- [ ] **Step 1: Update the enum definition**
-
-In `src/cli/project_tab_ops.hpp`, replace:
-
-```cpp
-enum class AuxFolder {
-    Pictures,
-    Bom,
-    AssemblyGuide,
-    Others,
-};
-```
-
-with:
+In `src/cli/project_tab_ops.hpp`, find the existing `enum class AuxFolder` definition (currently lists `Pictures, Bom, AssemblyGuide, Others`) and replace its body with:
 
 ```cpp
 enum class AuxFolder {
@@ -333,9 +308,9 @@ enum class AuxFolder {
 };
 ```
 
-- [ ] **Step 2: Update the three lookup functions in `project_tab_ops.cpp`**
+- [ ] **Step 3: Update the three lookup functions in `project_tab_ops.cpp`**
 
-Replace the existing `folder_flag` / `folder_json_key` / `folder_subdir` block (lines 192-220):
+In `src/cli/project_tab_ops.cpp`, find the `// AuxFolder helpers` comment banner and replace the three function bodies (`folder_flag`, `folder_json_key`, `folder_subdir`) with:
 
 ```cpp
 std::string folder_flag(AuxFolder f) {
@@ -372,39 +347,19 @@ std::string folder_subdir(AuxFolder f) {
 }
 ```
 
-- [ ] **Step 3: Update the `aux_list` iteration set in `project_tab_ops.cpp:231`**
+- [ ] **Step 4: Update the `aux_list` iteration set in `project_tab_ops.cpp`**
 
-Replace:
-```cpp
-    for (const auto folder : {AuxFolder::Pictures, AuxFolder::Bom,
-                               AuxFolder::AssemblyGuide, AuxFolder::Others}) {
-```
-with:
+In `src/cli/project_tab_ops.cpp`, find `std::vector<AuxEntry> aux_list(ProjectState& state)`. Inside its body, locate the `for (const auto folder : {AuxFolder::Pictures, AuxFolder::Bom, ...})` and replace it with:
 ```cpp
     for (const auto folder : {AuxFolder::ModelPictures, AuxFolder::ProfilePictures,
                                AuxFolder::BillOfMaterials, AuxFolder::AssemblyGuide,
                                AuxFolder::Others}) {
 ```
 
-- [ ] **Step 4: Update the inline `"Model Pictures"` literal in `delete_cover_file_if_unreferenced`**
+- [ ] **Step 5: Update `parse_folder` in `src/cli/commands/project_tab.cpp`**
 
-In `src/cli/project_tab_ops.cpp:79`, the string literal `"Model Pictures"` is already correct (was an accidental partial fix in earlier code). Leave it — this helper will be deleted entirely in Task 4. No edit needed here.
+In `src/cli/commands/project_tab.cpp`, find `static AuxFolder parse_folder(const std::string& s, OutputMode mode)`. Replace its entire body with:
 
-- [ ] **Step 5: Update `parse_folder` in `src/cli/commands/project_tab.cpp:247-255`**
-
-Replace:
-```cpp
-static AuxFolder parse_folder(const std::string& s, OutputMode mode) {
-    if (s == "pictures")       return AuxFolder::Pictures;
-    if (s == "bom")            return AuxFolder::Bom;
-    if (s == "assembly-guide") return AuxFolder::AssemblyGuide;
-    if (s == "others")         return AuxFolder::Others;
-    emit_error(mode, "usage_error", "unknown folder: " + s +
-               " (expected: pictures|bom|assembly-guide|others)");
-    std::exit(to_int(ExitCode::usage_error));
-}
-```
-with:
 ```cpp
 static AuxFolder parse_folder(const std::string& s, OutputMode mode) {
     if (s == "model-pictures")    return AuxFolder::ModelPictures;
@@ -420,76 +375,106 @@ static AuxFolder parse_folder(const std::string& s, OutputMode mode) {
 
 - [ ] **Step 6: Update existing aux ops tests for enum renames**
 
-In `tests/cli/unit/test_project_aux_ops.cpp`:
-- Line 74-77: change the three assertions to match the new flag strings:
-  ```cpp
-  REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::ModelPictures)    == "model-pictures");
-  REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::BillOfMaterials)  == "bill-of-materials");
-  REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::AssemblyGuide)    == "assembly-guide");
-  REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::Others)           == "others");
-  ```
-- Line 81-82: change the json_key assertions:
-  ```cpp
-  REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::AssemblyGuide) == "assembly_guide");
-  REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::ModelPictures) == "model_pictures");
-  ```
-- Lines 94, 112, 118, 132, 137, 149, 160, 173, 177, 190 and any other `AuxFolder::Pictures` / `AuxFolder::Bom` reference → rewrite to `AuxFolder::ModelPictures` / `AuxFolder::BillOfMaterials` respectively. No semantic change.
-
-- [ ] **Step 7: Update existing roundtrip test for enum renames**
-
-In `tests/cli/roundtrip/test_project_tab.cpp`:
-- Line 63: `bambu_cli::AuxFolder::Others` (no change).
-- Line 114: `bambu_cli::AuxFolder::Pictures` → `bambu_cli::AuxFolder::ModelPictures`.
-- Any other Pictures/Bom references → rename to ModelPictures/BillOfMaterials.
-
-- [ ] **Step 8: Update info/profile ops tests if they reference AuxFolder**
-
-Grep for `AuxFolder::Pictures` and `AuxFolder::Bom` in `tests/cli/unit/test_project_info_ops.cpp` and `tests/cli/unit/test_project_profile_ops.cpp`. Rename any hits the same way.
-
-```
-grep -n "AuxFolder::Pictures\|AuxFolder::Bom" tests/cli/unit/*.cpp tests/cli/roundtrip/*.cpp
+In `tests/cli/unit/test_project_aux_ops.cpp`, find the four `folder_flag` assertions inside the test case `"folder_flag returns hyphen form"`. Replace them with:
+```cpp
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::ModelPictures)    == "model-pictures");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::BillOfMaterials)  == "bill-of-materials");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::AssemblyGuide)    == "assembly-guide");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::Others)           == "others");
 ```
 
-- [ ] **Step 9: Build and run all tests**
+Then in the `folder_json_key` test case, replace the two assertions with:
+```cpp
+    REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::AssemblyGuide) == "assembly_guide");
+    REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::ModelPictures) == "model_pictures");
+```
+
+Then search the whole file for any other `AuxFolder::Pictures` or `AuxFolder::Bom` occurrence and rewrite to `AuxFolder::ModelPictures` / `AuxFolder::BillOfMaterials` respectively. There are no semantic changes — every existing test still asserts the same operation on the same (renamed) folder.
+
+- [ ] **Step 7: Add a new `aux_list` test case for ProfilePictures enumeration**
+
+In `tests/cli/unit/test_project_aux_ops.cpp`, append at the end of the file:
+
+```cpp
+TEST_CASE("aux_list: file added under Profile Pictures is enumerated",
+          "[unit][c3][aux_list]") {
+    bambu_cli::ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    const std::string kPng = std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/../cover_smoke.png";
+    bambu_cli::AuxAddParams ap;
+    ap.folder    = bambu_cli::AuxFolder::ProfilePictures;
+    ap.file_path = kPng;
+    bambu_cli::aux_add(s, ap);
+
+    const auto entries = bambu_cli::aux_list(s);
+    bool saw = false;
+    for (const auto& e : entries) {
+        if (e.folder == bambu_cli::AuxFolder::ProfilePictures &&
+            e.name == "cover_smoke.png") {
+            saw = true;
+            break;
+        }
+    }
+    REQUIRE(saw);
+}
+```
+
+(Include guard: `tests/cli/unit/test_project_aux_ops.cpp` already includes `unit_helpers.hpp` and `project_tab_ops.hpp`. No new includes required.)
+
+- [ ] **Step 8: Update the existing roundtrip test for enum renames**
+
+In `tests/cli/roundtrip/test_project_tab.cpp`, search the whole file for `AuxFolder::Pictures` and `AuxFolder::Bom`. Rewrite each to `AuxFolder::ModelPictures` and `AuxFolder::BillOfMaterials` respectively.
+
+- [ ] **Step 9: Update info/profile ops tests if they reference AuxFolder**
+
+```
+grep -n "AuxFolder::Pictures\|AuxFolder::Bom" tests/cli/unit/test_project_info_ops.cpp tests/cli/unit/test_project_profile_ops.cpp
+```
+For each hit, rewrite to the canonical names. If no hits, nothing to do.
+
+- [ ] **Step 10: Build and run all tests**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
 build/tests/RelWithDebInfo/cli_tests.exe
 ```
-Expected: build succeeds; `[aux_folder_names]` passes; existing aux ops + roundtrip tests pass. The shared-cover refcount tests (in `test_project_info_ops` / `test_project_profile_ops`) still pass at this point because we haven't touched the cover plumbing yet — the helper folder name `"Model Pictures"` on line 79 was already correct.
+Expected: build succeeds; `[aux_folder_names]` passes; the new `aux_list` ProfilePictures case passes; existing aux ops + roundtrip tests pass. The cover plumbing has not been touched yet, so `[unit][c3]` cover tests still pass with their current expectations (they will be updated in Task 3 when the cover decoupling lands).
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```
 git add -u src/ tests/
 git add tests/cli/unit/test_aux_folder_canonical_names.cpp
-git commit -m "refactor(cli): canonical AuxFolder names (Model Pictures / Profile Pictures / Bill of Materials / Assembly Guide)
+git commit -m "refactor(cli): canonical AuxFolder names + ProfilePictures variant
 
-Rename AuxFolder enum + flag values + JSON keys + archive subdirs to
-match Bambu Studio's canonical layout (src/slic3r/GUI/Auxiliary.hpp:75,
-Project.cpp:214-226 and verified against test_reference.3mf). Add
-ProfilePictures variant. No alias compat for old pictures/bom flag
-values (CLI is pre-release). Cover plumbing is unchanged in this task —
-that is the next step."
+Rename AuxFolder enum (Pictures->ModelPictures, Bom->BillOfMaterials)
+and update flag/JSON/subdir lookups + parse_folder + all callsites and
+existing tests. Add ProfilePictures variant + aux_list enumeration
+test. New test_aux_folder_canonical_names.cpp pins the exact strings.
+No alias compat for old pictures/bom flag values (CLI is pre-release).
+Cover plumbing is unchanged in this task — see Task 3."
 ```
 
 ---
 
-## Task 4: Decouple DesignerCover from ProfileCover
+## Task 3: Decouple DesignerCover from ProfileCover
 
 **Files:**
-- Modify: `src/cli/project_tab_ops.hpp` (add `cover_name` to params; expose `embed_image_into_folder` in `detail::`)
-- Modify: `src/cli/project_tab_ops.cpp` (replace embed_cover + refcount helpers; rewire info_set/profile_set)
+- Modify: `src/cli/project_tab_ops.hpp`
+- Modify: `src/cli/project_tab_ops.cpp`
 - Create: `tests/cli/unit/test_cover_decoupling.cpp`
 - Modify: `tests/cli/CMakeLists.txt`
-- Modify: `tests/cli/unit/test_project_info_ops.cpp` (existing cover tests need new expectations)
-- Modify: `tests/cli/unit/test_project_profile_ops.cpp` (existing cover tests need new expectations)
+- Modify: `tests/cli/unit/test_project_info_ops.cpp`
+- Modify: `tests/cli/unit/test_project_profile_ops.cpp`
+
+Mutual-exclusion of `--cover` + `--cover-name` and `sanitize_aux_name` on `--cover-name` live in the CLI layer, NOT here — those land in Task 4. This task's `info_set` / `profile_set` trust their inputs: if both `cover_path` and `cover_name` are set, `cover_path` wins (assumed-invalid combination prevented by the CLI layer).
 
 - [ ] **Step 1: Add new fields to InfoSetParams / ProfileSetParams + declare helpers**
 
 In `src/cli/project_tab_ops.hpp`:
 
-Add `cover_name` next to `cover_path` in `InfoSetParams`:
+Find `struct InfoSetParams` and replace it with:
 ```cpp
 struct InfoSetParams {
     std::optional<std::string> title;
@@ -501,7 +486,7 @@ struct InfoSetParams {
 };
 ```
 
-Same addition to `ProfileSetParams`:
+Find `struct ProfileSetParams` and replace it with:
 ```cpp
 struct ProfileSetParams {
     std::optional<std::string> title;
@@ -511,28 +496,27 @@ struct ProfileSetParams {
 };
 ```
 
-In the `namespace detail { ... }` block at the bottom of the header (next to `is_png_or_jpeg`), add:
+Find the `namespace detail` block added in Task 1 (containing the `is_png_or_jpeg` declaration). Inside that block, append the new declarations:
 ```cpp
-namespace detail {
-    bool is_png_or_jpeg(const std::string& path);
-
     // Embed <on_disk_path> as <basename(on_disk_path)> under the aux temp
     // <folder>. Validates PNG/JPEG signature. Returns the basename written.
     // Throws BadCoverImage on bad signature / unreadable source.
-    // <folder> must be ModelPictures or ProfilePictures.
+    // <folder> must be ModelPictures or ProfilePictures (anything else throws
+    // std::invalid_argument as an internal sanity check; CLI parsing never
+    // produces those values for the cover paths).
     std::string embed_image_into_folder(Slic3r::Model& model,
                                         AuxFolder folder,
                                         const std::string& on_disk_path);
 
     // Throws std::out_of_range if Auxiliaries/<folder>/<basename> is not
-    // present in the aux temp dir.
+    // present in the aux temp dir. Maps to ExitCode::unknown_reference (6)
+    // via run_mutation.
     void require_image_in_folder(const Slic3r::Model& model,
                                  AuxFolder folder,
                                  const std::string& basename);
-}
 ```
 
-Add a forward declaration of `Slic3r::Model` near the top of the header (after the existing `#include`s, before `namespace bambu_cli {`). The current header doesn't include `<libslic3r/Model.hpp>` (only `project_state.hpp` and `exceptions.hpp`), so a forward decl is required for the new helpers' signatures:
+Add a forward declaration of `Slic3r::Model` near the top of the header (after the existing `#include`s, before `namespace bambu_cli {`). The current header doesn't include `<libslic3r/Model.hpp>`, so a forward decl is required:
 ```cpp
 namespace Slic3r { class Model; }
 ```
@@ -562,28 +546,23 @@ TEST_CASE("cover decoupling: designer cover lands in Model Pictures, profile in 
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
 
-    // 1. Set designer cover (PNG).
     bambu_cli::InfoSetParams ip;
     ip.cover_path = kPng;
     REQUIRE_NOTHROW(bambu_cli::info_set(s, ip));
 
-    // 2. Set profile cover (JPEG — new in this change).
     bambu_cli::ProfileSetParams pp;
     pp.cover_path = kJpg;
     REQUIRE_NOTHROW(bambu_cli::profile_set(s, pp));
 
-    // 3. Each metadata pointer carries its own basename.
     REQUIRE(s.model.model_info);
     REQUIRE(s.model.profile_info);
     REQUIRE(s.model.model_info->cover_file == fs::path(kPng).filename().string());
     REQUIRE(s.model.profile_info->ProfileCover == fs::path(kJpg).filename().string());
 
-    // 4. Each on-disk file lives under its own folder.
     const fs::path aux = s.model.get_auxiliary_file_temp_path();
     REQUIRE(fs::exists(aux / "Model Pictures"   / fs::path(kPng).filename()));
     REQUIRE(fs::exists(aux / "Profile Pictures" / fs::path(kJpg).filename()));
 
-    // 5. The two are independent — no shared cover.png anywhere.
     REQUIRE_FALSE(fs::exists(aux / "Model Pictures"   / "cover.png"));
     REQUIRE_FALSE(fs::exists(aux / "Profile Pictures" / "cover.png"));
 }
@@ -603,7 +582,6 @@ TEST_CASE("cover decoupling: info clear cover leaves profile cover intact",
     REQUIRE(s.model.model_info->cover_file.empty());
     REQUIRE(s.model.profile_info->ProfileCover == fs::path(kJpg).filename().string());
 
-    // Profile's file is untouched on disk.
     const fs::path aux = s.model.get_auxiliary_file_temp_path();
     REQUIRE(fs::exists(aux / "Profile Pictures" / fs::path(kJpg).filename()));
 }
@@ -641,7 +619,7 @@ TEST_CASE("cover decoupling: JPEG cover accepted (was PNG-only)",
 
 - [ ] **Step 3: Register new test in CMake**
 
-Insert into `tests/cli/CMakeLists.txt` after `unit/test_aux_folder_canonical_names.cpp`:
+In `tests/cli/CMakeLists.txt`, insert into `BAMBU_CLI_TEST_SOURCES` immediately after `unit/test_aux_folder_canonical_names.cpp`:
 ```cmake
     unit/test_cover_decoupling.cpp
 ```
@@ -656,9 +634,16 @@ Expected: the JPEG case fails (old code rejects non-PNG) and the decouple assert
 
 - [ ] **Step 5: Replace embed_cover + refcount helpers in `project_tab_ops.cpp`**
 
-Delete the existing `embed_cover` (lines 50-64), `info_cover_empty` (71-73), `profile_cover_empty` (74-76), `delete_cover_file_if_unreferenced` (77-82), and `check_png_signature` (lines 26-32) — `check_png_signature` is no longer referenced anywhere after this change.
+In `src/cli/project_tab_ops.cpp`, delete the following entire static helpers (they sit near the top of the file under the `// Internal helpers` banner):
+- `static const uint8_t kPngSignature[8] = {...};` plus `static bool check_png_signature(...)`
+- `static void embed_cover(...)`
+- `static bool info_cover_empty(...)`
+- `static bool profile_cover_empty(...)`
+- `static void delete_cover_file_if_unreferenced(...)`
 
-Add the new helpers in the same area:
+These are no longer referenced after this task.
+
+In the same area, add the two new helpers:
 
 ```cpp
 namespace detail {
@@ -700,30 +685,30 @@ void require_image_in_folder(const Slic3r::Model& model,
 
 - [ ] **Step 6: Rewire `info_set` and `info_clear`**
 
-Replace `info_set` (around line 114) with:
+In `src/cli/project_tab_ops.cpp`, find `std::string info_set(ProjectState& state, const InfoSetParams& p)` and replace its body with:
 ```cpp
 std::string info_set(ProjectState& state, const InfoSetParams& p) {
-    if (p.cover_path && p.cover_name)
-        throw std::invalid_argument(
-            "info_set: --cover and --cover-name are mutually exclusive");
     auto& mi = ensure_model_info(state.model);
     if (p.title)       mi.model_name  = *p.title;
     if (p.description) mi.description = *p.description;
     if (p.license)     mi.license     = *p.license;
     if (p.copyright)   mi.copyright   = *p.copyright;
+    // Mutual exclusion + name sanitization are enforced by the CLI layer
+    // (commands/project_tab.cpp). If both are set, cover_path wins.
     if (p.cover_path) {
         mi.cover_file = detail::embed_image_into_folder(
             state.model, AuxFolder::ModelPictures, *p.cover_path);
     } else if (p.cover_name) {
-        const std::string nm = sanitize_aux_name(*p.cover_name);
-        detail::require_image_in_folder(state.model, AuxFolder::ModelPictures, nm);
-        mi.cover_file = nm;
+        detail::require_image_in_folder(state.model,
+                                        AuxFolder::ModelPictures,
+                                        *p.cover_name);
+        mi.cover_file = *p.cover_name;
     }
     return "applied info edits";
 }
 ```
 
-Replace `info_clear` (around line 125):
+Find `std::string info_clear(ProjectState& state, const std::vector<std::string>& fields)` and replace its body with:
 ```cpp
 std::string info_clear(ProjectState& state, const std::vector<std::string>& fields) {
     validate_fields(fields, allowed_info_fields());
@@ -744,28 +729,27 @@ Note: the on-disk image is no longer deleted by `clear cover` — it remains as 
 
 - [ ] **Step 7: Rewire `profile_set` and `profile_clear`**
 
-Replace `profile_set` (around line 162):
+Find `std::string profile_set(ProjectState& state, const ProfileSetParams& p)` and replace its body with:
 ```cpp
 std::string profile_set(ProjectState& state, const ProfileSetParams& p) {
-    if (p.cover_path && p.cover_name)
-        throw std::invalid_argument(
-            "profile_set: --cover and --cover-name are mutually exclusive");
     auto& pi = ensure_profile_info(state.model);
     if (p.title)       pi.ProfileTile        = *p.title;
     if (p.description) pi.ProfileDescription = *p.description;
+    // Mutual exclusion + name sanitization are enforced by the CLI layer.
     if (p.cover_path) {
         pi.ProfileCover = detail::embed_image_into_folder(
             state.model, AuxFolder::ProfilePictures, *p.cover_path);
     } else if (p.cover_name) {
-        const std::string nm = sanitize_aux_name(*p.cover_name);
-        detail::require_image_in_folder(state.model, AuxFolder::ProfilePictures, nm);
-        pi.ProfileCover = nm;
+        detail::require_image_in_folder(state.model,
+                                        AuxFolder::ProfilePictures,
+                                        *p.cover_name);
+        pi.ProfileCover = *p.cover_name;
     }
     return "applied profile edits";
 }
 ```
 
-Replace `profile_clear` (around line 174):
+Find `std::string profile_clear(ProjectState& state, const std::vector<std::string>& fields)` and replace its body with:
 ```cpp
 std::string profile_clear(ProjectState& state, const std::vector<std::string>& fields) {
     validate_fields(fields, allowed_profile_fields());
@@ -782,27 +766,25 @@ std::string profile_clear(ProjectState& state, const std::vector<std::string>& f
 
 - [ ] **Step 8: Update existing cover tests in test_project_info_ops.cpp**
 
-Open `tests/cli/unit/test_project_info_ops.cpp` and find any test asserting the embed path was `cover.png` or the refcount-delete behavior on `info clear cover`. Update each:
-- The expected `cover_file` value becomes the basename of whatever path the test sets (e.g. `kPng` → `"cover_smoke.png"`).
-- The expected on-disk path becomes `<aux>/Model Pictures/<basename>` (the literal `"cover.png"` filename is no longer used; the original basename is preserved).
-- Any test that asserted the on-disk file is deleted by `info clear cover` should now assert the on-disk file STILL EXISTS after clear (the metadata pointer is cleared, the file is left in place).
-
-If a test name says "shared-cover refcount" or similar, the test's premise is gone — delete the test and replace with whatever positive coverage of the new behavior is missing. The new `test_cover_decoupling.cpp` already covers the independence-of-folders cases.
+Open `tests/cli/unit/test_project_info_ops.cpp` and find every test that exercises `--cover` or `clear cover` on the info side:
+- Replace expected `model_info->cover_file == "cover.png"` with the basename of whatever path the test sets (e.g. `"cover_smoke.png"` if the test uses `kPng`).
+- Replace existence assertions on `<aux>/Model Pictures/cover.png` with `<aux>/Model Pictures/<basename>`.
+- Tests asserting that `info clear cover` deletes the on-disk file → flip the assertion: the file STILL EXISTS after clear. Only the metadata pointer is blanked.
+- Tests whose premise is "designer and profile share a single cover.png" → delete entirely. `test_cover_decoupling.cpp` already provides positive coverage of independence.
 
 - [ ] **Step 9: Update existing cover tests in test_project_profile_ops.cpp**
 
 Open `tests/cli/unit/test_project_profile_ops.cpp`. For every test that exercises `--cover` or `clear cover`:
-- Replace expected `profile_info->ProfileCover == "cover.png"` with `profile_info->ProfileCover == fs::path(<the test's source path>).filename().string()` (e.g. `"cover_smoke.png"` if the test uses `kPng`).
+- Replace expected `profile_info->ProfileCover == "cover.png"` with the basename of the source path (e.g. `"cover_smoke.png"`).
 - Replace any existence assertion on `<aux>/Model Pictures/cover.png` with `<aux>/Profile Pictures/<basename>` — the profile cover now lives in its own folder.
-- Any test that asserted the shared `cover.png` is deleted by `profile clear cover` should be flipped: the file STILL EXISTS after `profile clear cover`. Only the metadata pointer is blanked.
-- Delete any test whose premise was "designer and profile share a single cover.png" — that behavior is gone. The positive coverage of independence is in `test_cover_decoupling.cpp`.
+- Tests asserting shared-cover refcount deletion → flip: the file STILL EXISTS after `profile clear cover`.
+- Tests asserting "designer + profile share a file" → delete.
 
 - [ ] **Step 10: Build and run cover tests**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
 build/tests/RelWithDebInfo/cli_tests.exe "[cover_decouple]"
-build/tests/RelWithDebInfo/cli_tests.exe "[unit][c3]"
 build/tests/RelWithDebInfo/cli_tests.exe "[unit]"
 ```
 Expected: all green.
@@ -817,22 +799,26 @@ git commit -m "feat(cli): decouple DesignerCover from ProfileCover
 DesignerCover now lives at Auxiliaries/Model Pictures/<basename>;
 ProfileCover at Auxiliaries/Profile Pictures/<basename>. Each carries
 its own basename in metadata. Removed the shared-cover.png refcount
-machinery (info_cover_empty / profile_cover_empty /
-delete_cover_file_if_unreferenced). info/profile_clear cover now blanks
-the metadata pointer only — the on-disk image stays as a normal aux
-entry. JPEG accepted alongside PNG via is_png_or_jpeg."
+machinery. info/profile_clear cover now blanks the metadata pointer
+only — the on-disk image stays as a normal aux entry. JPEG accepted
+alongside PNG via is_png_or_jpeg. Mutual exclusion + name sanitization
+of cover_name remain to be wired at the CLI layer in Task 4."
 ```
 
 ---
 
-## Task 5: CLI flag wiring for `--cover-name` + mutual exclusion
+## Task 4: CLI flag wiring for `--cover-name` + mutual exclusion + sanitization
 
 **Files:**
 - Modify: `src/cli/commands/project_tab.cpp`
 - Create: `tests/cli/unit/test_cover_pick_by_name.cpp`
+- Modify: `tests/cli/e2e/test_project_info.cpp`
+- Modify: `tests/cli/e2e/test_project_profile.cpp`
 - Modify: `tests/cli/CMakeLists.txt`
 
-- [ ] **Step 1: Write the failing test**
+Two layers of tests here: unit tests cover the ops-layer contract (`require_image_in_folder` misses throw `std::out_of_range`), and e2e tests cover the CLI-layer contract (mutual exclusion + path-separator rejection produce exit code 1 from the binary).
+
+- [ ] **Step 1: Write the failing unit test (ops-layer contract)**
 
 Create `tests/cli/unit/test_cover_pick_by_name.cpp`:
 
@@ -856,7 +842,6 @@ TEST_CASE("--cover-name: selects existing image in Model Pictures",
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
 
-    // Stage a file via aux_add first.
     bambu_cli::AuxAddParams ap;
     ap.folder    = bambu_cli::AuxFolder::ModelPictures;
     ap.file_path = kPng;
@@ -868,7 +853,7 @@ TEST_CASE("--cover-name: selects existing image in Model Pictures",
     REQUIRE(s.model.model_info->cover_file == "cover_smoke.png");
 }
 
-TEST_CASE("--cover-name: throws when name not present in folder",
+TEST_CASE("--cover-name: throws std::out_of_range when name not present in folder",
           "[unit][cover_name]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
@@ -876,27 +861,6 @@ TEST_CASE("--cover-name: throws when name not present in folder",
     bambu_cli::InfoSetParams ip;
     ip.cover_name = "absent.png";
     REQUIRE_THROWS_AS(bambu_cli::info_set(s, ip), std::out_of_range);
-}
-
-TEST_CASE("--cover-name: path separator rejected by sanitize_aux_name",
-          "[unit][cover_name]") {
-    ProjectState s;
-    bambu_cli_unit::load_reference_into(s);
-
-    bambu_cli::InfoSetParams ip;
-    ip.cover_name = "subdir/cover.png";
-    REQUIRE_THROWS_AS(bambu_cli::info_set(s, ip), bambu_cli::AuxNameError);
-}
-
-TEST_CASE("--cover-name + --cover together: invalid_argument",
-          "[unit][cover_name]") {
-    ProjectState s;
-    bambu_cli_unit::load_reference_into(s);
-
-    bambu_cli::InfoSetParams ip;
-    ip.cover_path = kPng;
-    ip.cover_name = "anything.png";
-    REQUIRE_THROWS_AS(bambu_cli::info_set(s, ip), std::invalid_argument);
 }
 
 TEST_CASE("--cover-name: profile_set targets Profile Pictures",
@@ -916,81 +880,82 @@ TEST_CASE("--cover-name: profile_set targets Profile Pictures",
 }
 ```
 
-- [ ] **Step 2: Register in CMake**
+Note what is NOT here: tests for `--cover + --cover-name` together and for path-separator rejection. Those validations live at the CLI layer; their tests are e2e and live in Step 4-5 below.
 
-Insert after `unit/test_cover_decoupling.cpp`:
+- [ ] **Step 2: Register the unit test in CMake**
+
+In `tests/cli/CMakeLists.txt`, insert into `BAMBU_CLI_TEST_SOURCES` immediately after `unit/test_cover_decoupling.cpp`:
 ```cmake
     unit/test_cover_pick_by_name.cpp
 ```
 
-- [ ] **Step 3: Run test — expect PASS at this point**
+- [ ] **Step 3: Run unit test — expect PASS at this point**
 
-The ops layer (info_set/profile_set) already handles `cover_name` after Task 4. So the test should compile and pass already. Run:
+The ops layer already handles the trusting `cover_name` contract after Task 3:
 ```
+cmake --build build --target cli_tests --config RelWithDebInfo
 build/tests/RelWithDebInfo/cli_tests.exe "[cover_name]"
 ```
-Expected: 5 sections, all PASS.
+Expected: 3 sections, all PASS.
 
-If it does NOT pass, the failure means Task 4 missed wiring. Go fix Task 4 before continuing.
+- [ ] **Step 4: Wire `--cover-name` + mutual exclusion + sanitization into `project info set`**
 
-- [ ] **Step 4: Wire `--cover-name` into the CLI `project info set` command**
-
-In `src/cli/commands/project_tab.cpp`, find the `InfoSetArgs` struct (around line 92-95):
-```cpp
-struct InfoSetArgs {
-    std::string file, output;
-    std::string title, description, license, copyright, cover;
-    bool has_title{}, has_desc{}, has_license{}, has_copyright{}, has_cover{};
-};
-```
-Add two fields:
+In `src/cli/commands/project_tab.cpp`, find `struct InfoSetArgs`. Replace the struct definition with:
 ```cpp
 struct InfoSetArgs {
     std::string file, output;
     std::string title, description, license, copyright, cover, cover_name;
-    bool has_title{}, has_desc{}, has_license{}, has_copyright{}, has_cover{}, has_cover_name{};
+    bool has_title{}, has_desc{}, has_license{}, has_copyright{},
+         has_cover{}, has_cover_name{};
 };
 ```
 
-In the `register_info` setter block (around line 116-127), update the help string on `--cover` and add `--cover-name`. Replace:
+Then find the `register_info` function body. Inside the `set` subcommand setup, locate the existing `set->add_option("--cover", set_a->cover, "cover image (PNG only)")` line and replace it with:
 ```cpp
-    set->add_option("--cover",       set_a->cover,       "cover image (PNG only)")
-       ->each([set_a](const std::string&){ set_a->has_cover = true; });
-```
-with:
-```cpp
-    set->add_option("--cover",       set_a->cover,       "cover image to embed (PNG or JPEG)")
+    set->add_option("--cover",       set_a->cover,
+                    "cover image to embed (PNG or JPEG)")
        ->each([set_a](const std::string&){ set_a->has_cover = true; });
     set->add_option("--cover-name",  set_a->cover_name,
-                    "select existing image in Model Pictures as cover (mutually exclusive with --cover)")
+                    "select existing image in Model Pictures as cover "
+                    "(mutually exclusive with --cover)")
        ->each([set_a](const std::string&){ set_a->has_cover_name = true; });
 ```
 
-In the callback (around line 132-141), update the "all args empty" check and the param assembly. Find:
-```cpp
-        if (!set_a->has_title && !set_a->has_desc && !set_a->has_license &&
-            !set_a->has_copyright && !set_a->has_cover) {
-            // ...usage error path...
-        }
-        InfoSetParams p;
-        // ...assign existing fields...
-        if (set_a->has_cover)     p.cover_path  = set_a->cover;
-```
-and update to:
+In the same `set` subcommand callback, find the existing "all args empty" usage-error check (the one referencing `set_a->has_title && set_a->has_desc && ...`) and update both that check and the param assembly:
 ```cpp
         if (!set_a->has_title && !set_a->has_desc && !set_a->has_license &&
             !set_a->has_copyright && !set_a->has_cover && !set_a->has_cover_name) {
-            // ...same usage error path...
+            emit_error(mode, "usage_error",
+                       "at least one of --title/--description/--license/"
+                       "--copyright/--cover/--cover-name is required");
+            std::exit(to_int(ExitCode::usage_error));
+        }
+        if (set_a->has_cover && set_a->has_cover_name) {
+            emit_error(mode, "usage_error",
+                       "--cover and --cover-name are mutually exclusive");
+            std::exit(to_int(ExitCode::usage_error));
         }
         InfoSetParams p;
-        // ...assign existing fields...
-        if (set_a->has_cover)      p.cover_path = set_a->cover;
-        if (set_a->has_cover_name) p.cover_name = set_a->cover_name;
+        if (set_a->has_title)      p.title       = set_a->title;
+        if (set_a->has_desc)       p.description = set_a->description;
+        if (set_a->has_license)    p.license     = set_a->license;
+        if (set_a->has_copyright)  p.copyright   = set_a->copyright;
+        if (set_a->has_cover)      p.cover_path  = set_a->cover;
+        if (set_a->has_cover_name) {
+            try {
+                p.cover_name = sanitize_aux_name(set_a->cover_name);
+            } catch (const AuxNameError& e) {
+                emit_error(mode, "usage_error", std::string("--cover-name: ") + e.what());
+                std::exit(to_int(ExitCode::usage_error));
+            }
+        }
 ```
 
-- [ ] **Step 5: Wire `--cover-name` into the CLI `project profile set` command**
+(Match the surrounding existing-pattern for the empty-args usage error; it may already use a different exact message — preserve whatever the file currently emits and only add the two new branches.)
 
-Same pattern. Edit `ProfileSetArgs` struct (around line 171-173) to add `cover_name` and `has_cover_name`:
+- [ ] **Step 5: Wire `--cover-name` + mutual exclusion + sanitization into `project profile set`**
+
+Same pattern. In `src/cli/commands/project_tab.cpp`, find `struct ProfileSetArgs` and replace with:
 ```cpp
 struct ProfileSetArgs {
     std::string file, output;
@@ -999,27 +964,127 @@ struct ProfileSetArgs {
 };
 ```
 
-In the `register_profile` setter block (around line 194-201), update `--cover` help text and add `--cover-name`:
+Find `register_profile`. In its `set` subcommand setup, locate `set->add_option("--cover", set_a->cover, "cover image (PNG only)")` and replace with:
 ```cpp
-    set->add_option("--cover",       set_a->cover,       "cover image to embed (PNG or JPEG)")
+    set->add_option("--cover",       set_a->cover,
+                    "cover image to embed (PNG or JPEG)")
        ->each([set_a](const std::string&){ set_a->has_cover = true; });
     set->add_option("--cover-name",  set_a->cover_name,
-                    "select existing image in Profile Pictures as cover (mutually exclusive with --cover)")
+                    "select existing image in Profile Pictures as cover "
+                    "(mutually exclusive with --cover)")
        ->each([set_a](const std::string&){ set_a->has_cover_name = true; });
 ```
 
-Callback adjustments (around line 205-212):
+In the same callback, update the empty-args check + param assembly:
 ```cpp
-        if (!set_a->has_title && !set_a->has_desc && !set_a->has_cover && !set_a->has_cover_name) {
-            // ...same usage error path...
+        if (!set_a->has_title && !set_a->has_desc &&
+            !set_a->has_cover && !set_a->has_cover_name) {
+            emit_error(mode, "usage_error",
+                       "at least one of --title/--description/--cover/--cover-name is required");
+            std::exit(to_int(ExitCode::usage_error));
+        }
+        if (set_a->has_cover && set_a->has_cover_name) {
+            emit_error(mode, "usage_error",
+                       "--cover and --cover-name are mutually exclusive");
+            std::exit(to_int(ExitCode::usage_error));
         }
         ProfileSetParams p;
-        // ...
-        if (set_a->has_cover)      p.cover_path = set_a->cover;
-        if (set_a->has_cover_name) p.cover_name = set_a->cover_name;
+        if (set_a->has_title)      p.title       = set_a->title;
+        if (set_a->has_desc)       p.description = set_a->description;
+        if (set_a->has_cover)      p.cover_path  = set_a->cover;
+        if (set_a->has_cover_name) {
+            try {
+                p.cover_name = sanitize_aux_name(set_a->cover_name);
+            } catch (const AuxNameError& e) {
+                emit_error(mode, "usage_error", std::string("--cover-name: ") + e.what());
+                std::exit(to_int(ExitCode::usage_error));
+            }
+        }
 ```
 
-- [ ] **Step 6: Build and exercise the CLI binary**
+(Add `#include "../exceptions.hpp"` to the top of `commands/project_tab.cpp` if it isn't already present — `AuxNameError` lives there.)
+
+- [ ] **Step 6: Add e2e tests for mutual exclusion and sanitization (CLI layer)**
+
+Open `tests/cli/e2e/test_project_info.cpp`. Append two new TEST_CASEs at the end:
+
+```cpp
+TEST_CASE("info set: --cover and --cover-name together fails with exit 1",
+          "[e2e][project_info][cover_name]") {
+    using namespace bambu_cli_test;
+    const std::string src = canonical_committed_3mf();
+    REQUIRE_FALSE(src.empty());
+    const std::string dst = fresh_temp_path(".3mf");
+    REQUIRE(read_zip_entry(src, "3D/3dmodel.model").size() > 0);  // sanity
+
+    const auto result = spawn_cli({
+        "project", "info", "set",
+        src,
+        "--output", dst,
+        "--cover", std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/../cover_smoke.png",
+        "--cover-name", "anything.png",
+    });
+    REQUIRE(result.exit_code == 1);
+    REQUIRE(result.stderr_text.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("info set: --cover-name with path separator fails with exit 1",
+          "[e2e][project_info][cover_name]") {
+    using namespace bambu_cli_test;
+    const std::string src = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path(".3mf");
+
+    const auto result = spawn_cli({
+        "project", "info", "set",
+        src,
+        "--output", dst,
+        "--cover-name", "subdir/cover.png",
+    });
+    REQUIRE(result.exit_code == 1);
+    REQUIRE(result.stderr_text.find("--cover-name") != std::string::npos);
+}
+```
+
+Open `tests/cli/e2e/test_project_profile.cpp`. Append the mirror cases (same structure, `info` → `profile`, message matchers unchanged):
+
+```cpp
+TEST_CASE("profile set: --cover and --cover-name together fails with exit 1",
+          "[e2e][project_profile][cover_name]") {
+    using namespace bambu_cli_test;
+    const std::string src = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path(".3mf");
+
+    const auto result = spawn_cli({
+        "project", "profile", "set",
+        src,
+        "--output", dst,
+        "--cover", std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/../cover_smoke.png",
+        "--cover-name", "anything.png",
+    });
+    REQUIRE(result.exit_code == 1);
+    REQUIRE(result.stderr_text.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("profile set: --cover-name with path separator fails with exit 1",
+          "[e2e][project_profile][cover_name]") {
+    using namespace bambu_cli_test;
+    const std::string src = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path(".3mf");
+
+    const auto result = spawn_cli({
+        "project", "profile", "set",
+        src,
+        "--output", dst,
+        "--cover-name", "subdir/cover.png",
+    });
+    REQUIRE(result.exit_code == 1);
+    REQUIRE(result.stderr_text.find("--cover-name") != std::string::npos);
+}
+```
+
+(Both e2e files already include `test_helpers.hpp` and have the `using namespace bambu_cli_test` precedent — match the existing style.)
+
+- [ ] **Step 7: Build the CLI binary + sanity-check help text**
 
 ```
 cmake --build build --target bambu-cli --config RelWithDebInfo
@@ -1028,22 +1093,33 @@ build/RelWithDebInfo/bambu-cli.exe project profile set --help
 ```
 Expected: both `--cover` and `--cover-name` listed in help with their new descriptions.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Run all tests**
+
+```
+cmake --build build --target cli_tests --config RelWithDebInfo
+build/tests/RelWithDebInfo/cli_tests.exe "[cover_name]"
+build/tests/RelWithDebInfo/cli_tests.exe
+```
+Expected: unit `[cover_name]` 3 sections green; e2e `[cover_name]` 4 sections green; full suite green.
+
+- [ ] **Step 9: Commit**
 
 ```
 git add -u src/ tests/
 git add tests/cli/unit/test_cover_pick_by_name.cpp
 git commit -m "feat(cli): --cover-name to select existing image as cover
 
-project info set / project profile set now accept --cover-name NAME
+project info set / project profile set accept --cover-name NAME
 alongside --cover PATH. --cover-name picks a file already present in
-Model Pictures (info) or Profile Pictures (profile) as the cover without
-re-embedding. The two flags are mutually exclusive."
+Model Pictures (info) or Profile Pictures (profile) as the cover
+without re-embedding. Mutual exclusion + sanitize_aux_name(--cover-name)
+are enforced at the CLI layer with exit 1 on violation; the ops layer
+trusts its inputs. require_image_in_folder miss -> exit 6."
 ```
 
 ---
 
-## Task 6: New invariant guard — `check_auxiliary_passthrough`
+## Task 5: New invariant guard — `check_auxiliary_passthrough`
 
 **Files:**
 - Modify: `src/cli/invariant_guard.hpp`
@@ -1069,7 +1145,6 @@ Create `tests/cli/unit/test_invariant_aux_passthrough.cpp`:
 
 namespace fs = boost::filesystem;
 
-// Build a tiny zip with the listed entries (archive-path, content-bytes).
 static std::string make_zip(const std::vector<std::pair<std::string, std::string>>& entries) {
     const fs::path p = fs::temp_directory_path() /
                        fs::unique_path("auxpass-%%%%-%%%%.zip");
@@ -1101,7 +1176,7 @@ TEST_CASE("aux passthrough: identical archives pass",
 TEST_CASE("aux passthrough: missing entry in post fails",
           "[unit][invariant_aux]") {
     const auto pre  = make_zip({{"Auxiliaries/Profile Pictures/x.jpg", "XYZ"}});
-    const auto post = make_zip({});  // empty
+    const auto post = make_zip({});
     std::string err;
     REQUIRE_FALSE(bambu_cli::check_auxiliary_passthrough(pre, post, &err));
     REQUIRE(err.find("Profile Pictures/x.jpg") != std::string::npos);
@@ -1122,7 +1197,7 @@ TEST_CASE("aux passthrough: non-Auxiliary entries ignored",
           "[unit][invariant_aux]") {
     const auto pre  = make_zip({{"3D/3dmodel.model", "X"},
                                 {"Auxiliaries/Others/k.txt", "K"}});
-    const auto post = make_zip({{"3D/3dmodel.model", "Y"},  // changed — ignored
+    const auto post = make_zip({{"3D/3dmodel.model", "Y"},
                                 {"Auxiliaries/Others/k.txt", "K"}});
     std::string err;
     REQUIRE(bambu_cli::check_auxiliary_passthrough(pre, post, &err));
@@ -1139,23 +1214,21 @@ TEST_CASE("aux passthrough: empty pre yields pass",
 }
 ```
 
-- [ ] **Step 2: Register in CMake**
-
-Insert after `unit/test_cover_pick_by_name.cpp`:
+Register in `tests/cli/CMakeLists.txt` immediately after `unit/test_cover_pick_by_name.cpp`:
 ```cmake
     unit/test_invariant_aux_passthrough.cpp
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails (compile error)**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
 ```
-Expected: build fails — `bambu_cli::check_auxiliary_passthrough` is not declared.
+Expected: build fails — `bambu_cli::check_auxiliary_passthrough` not declared.
 
-- [ ] **Step 4: Declare the new check in `invariant_guard.hpp`**
+- [ ] **Step 3: Declare the new check in `invariant_guard.hpp`**
 
-Add at the bottom of the file, before `} // namespace bambu_cli`:
+In `src/cli/invariant_guard.hpp`, find the closing `} // namespace bambu_cli`. Immediately before it, insert:
 
 ```cpp
 // Post-write check: every regular file under "Auxiliaries/" in <pre_path>
@@ -1171,17 +1244,16 @@ bool check_auxiliary_passthrough(const std::string& pre_path,
                                  std::string* err_out);
 ```
 
-- [ ] **Step 5: Implement `check_auxiliary_passthrough` in `invariant_guard.cpp`**
+- [ ] **Step 4: Implement `check_auxiliary_passthrough` in `invariant_guard.cpp`**
 
-At the top of `invariant_guard.cpp`, ensure these are present in includes:
+At the top of `src/cli/invariant_guard.cpp`, ensure these includes are present (add any missing):
 ```cpp
 #include <miniz.h>
 #include <cstring>
 #include <vector>
-#include <unordered_map>
 ```
 
-Add this function:
+Add the helpers + function. Place them in an anonymous namespace at the top of the file (or extend the existing anonymous namespace if one is already there):
 
 ```cpp
 namespace {
@@ -1227,7 +1299,7 @@ bool check_auxiliary_passthrough(const std::string& pre_path,
         char name_buf[1024] = {};
         mz_zip_reader_get_filename(&pre.zip, i, name_buf, sizeof(name_buf));
         std::string name = name_buf;
-        if (name.rfind("Auxiliaries/", 0) != 0) continue;  // not under Auxiliaries/
+        if (name.rfind("Auxiliaries/", 0) != 0) continue;
         if (mz_zip_reader_is_file_a_directory(&pre.zip, i)) continue;
 
         const int idx_post = mz_zip_reader_locate_file(&post.zip, name.c_str(), nullptr, 0);
@@ -1245,7 +1317,7 @@ bool check_auxiliary_passthrough(const std::string& pre_path,
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 5: Run test to verify it passes**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
@@ -1253,7 +1325,7 @@ build/tests/RelWithDebInfo/cli_tests.exe "[invariant_aux]"
 ```
 Expected: 5 sections, all PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```
 git add -u src/cli/invariant_guard.hpp src/cli/invariant_guard.cpp tests/cli/CMakeLists.txt
@@ -1262,19 +1334,21 @@ git commit -m "feat(cli): check_auxiliary_passthrough invariant guard
 
 Verifies every Auxiliaries/* entry in the source archive survives
 load->store with byte-identical contents. Catches accidental folder
-renames, missing files, or content drift in the save path. Not yet
-wired into run_guard — that's the next task once both new checks land."
+renames, missing files, or content drift. Not yet wired into run_guard
+— that lands in Task 7 once both new checks exist."
 ```
 
 ---
 
-## Task 7: New invariant guard — `check_cover_references_resolve`
+## Task 6: New invariant guard — `check_cover_references_resolve`
 
 **Files:**
 - Modify: `src/cli/invariant_guard.hpp`
 - Modify: `src/cli/invariant_guard.cpp`
 - Create: `tests/cli/unit/test_invariant_cover_references.cpp`
 - Modify: `tests/cli/CMakeLists.txt`
+
+Note on `extract_metadata`: this helper does a literal substring match for `name="KEY">VALUE</metadata>`. It is **by-construction** — it matches Bambu's exact output shape (one metadata element per line, attribute order `name="..."` first, value immediately following). It is NOT a general XML parser and would miss attribute reordering, comments, or namespace prefixes. Acceptable here because we run it on archives just produced by `store_bbs_3mf` itself, whose output shape is fixed. A code comment in Step 4 documents this.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1368,23 +1442,21 @@ TEST_CASE("cover refs: ProfileCover references absent file fails",
 }
 ```
 
-- [ ] **Step 2: Register in CMake**
-
-Insert after `unit/test_invariant_aux_passthrough.cpp`:
+Register in `tests/cli/CMakeLists.txt` immediately after `unit/test_invariant_aux_passthrough.cpp`:
 ```cmake
     unit/test_invariant_cover_references.cpp
 ```
 
-- [ ] **Step 3: Run test to verify it fails (compile error)**
+- [ ] **Step 2: Run test to verify it fails (compile error)**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
 ```
 Expected: build fails — `check_cover_references_resolve` not declared.
 
-- [ ] **Step 4: Declare in `invariant_guard.hpp`**
+- [ ] **Step 3: Declare in `invariant_guard.hpp`**
 
-Add to the header:
+In `src/cli/invariant_guard.hpp`, immediately after the `check_auxiliary_passthrough` declaration added in Task 5, insert:
 
 ```cpp
 // Verify DesignerCover and ProfileCover metadata in <archive_path>'s
@@ -1396,17 +1468,19 @@ bool check_cover_references_resolve(const std::string& archive_path,
                                     std::string* err_out);
 ```
 
-- [ ] **Step 5: Implement in `invariant_guard.cpp`**
+- [ ] **Step 4: Implement in `invariant_guard.cpp`**
 
-Add:
+Inside the same anonymous namespace as `ZipFile`/`open_zip`/`read_entry_bytes` (added in Task 5), append:
 
 ```cpp
-namespace {
-
-// Extract <metadata name="KEY">VALUE</metadata> values from a 3MF model XML
-// buffer. Returns an empty string if the key is not found. Tolerant of
-// whitespace/quoting variation but does NOT do full XML parsing — it's
-// matching the exact Bambu output shape (one metadata per line).
+// extract_metadata is a by-construction substring matcher, NOT a general
+// XML parser. It assumes Bambu's exact output shape for <metadata> elements:
+// (a) attribute order is `name="KEY"` first; (b) the value follows immediately
+// after the closing `">` of the name attribute; (c) the closing tag is the
+// literal "</metadata>" on the same logical text run. Reordered attributes,
+// XML comments inside the element, or namespace prefixes would all defeat
+// this. Acceptable here because we only run it on archives that
+// store_bbs_3mf itself just produced (see src/libslic3r/Format/bbs_3mf.cpp).
 static std::string extract_metadata(const std::string& xml, const std::string& key) {
     const std::string needle = "name=\"" + key + "\">";
     const auto p = xml.find(needle);
@@ -1416,9 +1490,11 @@ static std::string extract_metadata(const std::string& xml, const std::string& k
     if (end == std::string::npos) return "";
     return xml.substr(start, end - start);
 }
+```
 
-} // namespace
+Outside the anonymous namespace, add the function:
 
+```cpp
 bool check_cover_references_resolve(const std::string& archive_path,
                                     std::string* err_out) {
     auto fail = [err_out](std::string msg) {
@@ -1459,7 +1535,7 @@ bool check_cover_references_resolve(const std::string& archive_path,
 }
 ```
 
-- [ ] **Step 6: Run test**
+- [ ] **Step 5: Run test**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
@@ -1467,7 +1543,7 @@ build/tests/RelWithDebInfo/cli_tests.exe "[invariant_covref]"
 ```
 Expected: 4 sections, all PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```
 git add -u src/cli/invariant_guard.hpp src/cli/invariant_guard.cpp tests/cli/CMakeLists.txt
@@ -1476,27 +1552,24 @@ git commit -m "feat(cli): check_cover_references_resolve invariant guard
 
 Verifies DesignerCover/ProfileCover metadata in the saved 3D/3dmodel.model
 references filenames that actually exist in Model Pictures / Profile
-Pictures. Empty values are valid. Not yet wired into run_guard."
+Pictures. Empty values are valid. extract_metadata is documented as a
+by-construction substring matcher, not a general XML parser. Not yet
+wired into run_guard."
 ```
 
 ---
 
-## Task 8: Wire both new guards into `run_guard`
+## Task 7: Wire both new guards into `run_guard`
 
 **Files:**
-- Modify: `src/cli/invariant_guard.hpp` (extend `failed_check` documentation)
-- Modify: `src/cli/invariant_guard.cpp` (extend `run_guard` to call new checks)
-- Modify: `src/cli/io.cpp` (no change expected — `run_guard` is already called; we extend its body)
+- Modify: `src/cli/invariant_guard.hpp`
+- Modify: `src/cli/invariant_guard.cpp`
 
-- [ ] **Step 1: Inspect `run_guard` to find the integration point**
+`auxiliary_passthrough` needs the PRE archive path (the source archive that was loaded) — available as `state.source_path`. `cover_references_resolve` only needs the POST path.
 
-Read `src/cli/invariant_guard.cpp` and locate `run_guard(...)`. It currently runs three checks: rels, thumbnails, config_roundtrip. We will append two more: `auxiliary_passthrough` and `cover_references_resolve`.
+- [ ] **Step 1: Update the `failed_check` documentation in the header**
 
-`auxiliary_passthrough` requires the PRE archive path (the source archive that was loaded). That comes from `state.source_path`. `cover_references_resolve` only needs the POST path (the freshly-saved tmp).
-
-- [ ] **Step 2: Update the `failed_check` value documentation in the header**
-
-In `src/cli/invariant_guard.hpp`, find the `GuardResult` comment block (the one describing the three current checks `(a)`, `(b)`, `(c)`). Append:
+In `src/cli/invariant_guard.hpp`, find the `GuardResult` block describing checks (a), (b), (c). After the (c) line, append:
 
 ```cpp
 //   (d) auxiliary passthrough — every Auxiliaries/* file in
@@ -1508,15 +1581,15 @@ In `src/cli/invariant_guard.hpp`, find the `GuardResult` comment block (the one 
 //       metadata reference existing files in the canonical folders.
 ```
 
-Also update the `failed_check` field comment to list the new strings:
+Update the `failed_check` field comment to include the new strings:
 ```cpp
     std::string failed_check;     // "rels", "thumbnails", "config_roundtrip",
                                   // "auxiliary_passthrough", or "cover_references_resolve"
 ```
 
-- [ ] **Step 3: Extend `run_guard` to call the new checks**
+- [ ] **Step 2: Extend `run_guard` to call the new checks**
 
-In `src/cli/invariant_guard.cpp`, after the three existing checks succeed and before the final `r.ok = true; return r;`, insert:
+In `src/cli/invariant_guard.cpp`, find `run_guard(...)`. After the three existing check blocks succeed and before the final `r.ok = true; return r;`, insert:
 
 ```cpp
     // (d) auxiliary passthrough — only meaningful when we have a source
@@ -1541,19 +1614,19 @@ In `src/cli/invariant_guard.cpp`, after the three existing checks succeed and be
     }
 ```
 
-(Make sure `<boost/filesystem.hpp>` is included at the top — it likely already is; if not, add it.)
+(Verify `<boost/filesystem.hpp>` is included at the top; add if missing.)
 
-- [ ] **Step 4: Build and run the entire test suite**
+- [ ] **Step 3: Build and run the entire test suite**
 
 ```
 cmake --build build --target cli_tests --config RelWithDebInfo
 build/tests/RelWithDebInfo/cli_tests.exe
 ```
-Expected: all green (the new checks are run as part of every `save_project` invocation in tests; the existing roundtrip suite is the regression net).
+Expected: all green. Per pre-conditions (plan header): no committed `.3mf` fixture contains `Auxiliaries/*` entries, so `auxiliary_passthrough` passes vacuously for the existing roundtrip suite.
 
-If a test fails because some prior CLI-produced 3MF fixture had aux files in old-style folders (`Pictures/`, `Bom/`, `AssemblyGuide/`), the `auxiliary_passthrough` check will flag it. In that case the fixture itself is stale — note which fixture and either regenerate it or, if it's the committed `tests/cli/fixtures/reference.3mf`, decide whether to (a) re-export it from Bambu Studio with canonical names or (b) carve out an exemption in the guard for files under the legacy folders. Recommendation: regenerate. Discuss with the user before exempting.
+If any future fixture is added that produces aux content via the CLI's `aux add`, the guard catches accidental folder-name regressions automatically.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```
 git add -u src/cli/invariant_guard.hpp src/cli/invariant_guard.cpp
@@ -1567,28 +1640,24 @@ diff against."
 
 ---
 
-## Task 9: Round-trip test against `test_reference.3mf`
+## Task 8: Round-trip test against `test_reference.3mf`
 
 **Files:**
 - Create: `tests/cli/fixtures/test_reference.3mf` (binary; copy of the user-supplied file)
-- Modify: `tests/cli/CMakeLists.txt` (new fixture macro + new test source)
+- Modify: `tests/cli/CMakeLists.txt`
 - Create: `tests/cli/roundtrip/test_reference_3mf_passthrough.cpp`
 
 - [ ] **Step 1: Copy the fixture into the repo**
 
 ```
 cp "C:/Users/ildarcheg/Documents/GitHub/test_reference.3mf" tests/cli/fixtures/test_reference.3mf
-```
-
-Verify size and a quick sanity check on contents:
-```
 ls -l tests/cli/fixtures/test_reference.3mf
 ```
 Expected: ~4.5 MB. Contains `Auxiliaries/Model Pictures/50calpellet.jpg`, `Auxiliaries/Profile Pictures/5.45x39mm.jpg`, `Auxiliaries/Assembly Guide/D_02_40sw_PRINT_GUIDE.pdf`.
 
 - [ ] **Step 2: Expose the fixture path to tests via CMake**
 
-In `tests/cli/CMakeLists.txt`, in the `target_compile_definitions` block (after `BAMBU_CLI_FIXTURE_3MF`), add:
+In `tests/cli/CMakeLists.txt`, find the `target_compile_definitions(cli_tests PRIVATE ...)` block. Immediately after the existing `BAMBU_CLI_FIXTURE_3MF=...` line, add:
 
 ```cmake
     BAMBU_CLI_FIXTURE_TEST_REFERENCE_3MF="${CMAKE_SOURCE_DIR}/tests/cli/fixtures/test_reference.3mf"
@@ -1596,7 +1665,7 @@ In `tests/cli/CMakeLists.txt`, in the `target_compile_definitions` block (after 
 
 - [ ] **Step 3: Register the new round-trip test source**
 
-In `tests/cli/CMakeLists.txt`, append to `BAMBU_CLI_TEST_SOURCES` after `roundtrip/test_project_tab.cpp`:
+In `tests/cli/CMakeLists.txt`, in `BAMBU_CLI_TEST_SOURCES`, find `roundtrip/test_project_tab.cpp` and insert immediately after it:
 
 ```cmake
     roundtrip/test_reference_3mf_passthrough.cpp
@@ -1650,18 +1719,15 @@ TEST_CASE("test_reference.3mf round-trip preserves canonical aux layout",
     const std::string src = BAMBU_CLI_FIXTURE_TEST_REFERENCE_3MF;
     REQUIRE(fs::exists(src));
 
-    // Load.
     bambu_cli::ProjectState state;
     auto lr = bambu_cli::load_project(src, state);
     REQUIRE(lr.ok);
 
-    // Save to a fresh temp location (NOT in-place — leaves the fixture intact).
     const fs::path out = fs::temp_directory_path() /
                          fs::unique_path("refmf-%%%%-%%%%.3mf");
     auto sr = bambu_cli::save_project(state, out.string());
     REQUIRE(sr.ok);
 
-    // 1-4. Aux files preserved with canonical paths + identical content.
     const auto pre_jpg_a  = read_entry(src,           "Auxiliaries/Model Pictures/50calpellet.jpg");
     const auto post_jpg_a = read_entry(out.string(),  "Auxiliaries/Model Pictures/50calpellet.jpg");
     REQUIRE(pre_jpg_a == post_jpg_a);
@@ -1678,16 +1744,13 @@ TEST_CASE("test_reference.3mf round-trip preserves canonical aux layout",
     REQUIRE(has_entry(out.string(), "Auxiliaries/.thumbnails/thumbnail_middle.png"));
     REQUIRE(has_entry(out.string(), "Auxiliaries/.thumbnails/thumbnail_small.png"));
 
-    // 5. Cover metadata: basename-only references.
     const auto model_xml = read_entry(out.string(), "3D/3dmodel.model");
     REQUIRE(model_xml.find("name=\"DesignerCover\">50calpellet.jpg<") != std::string::npos);
     REQUIRE(model_xml.find("name=\"ProfileCover\">5.45x39mm.jpg<")   != std::string::npos);
 
-    // 6. Title / Description / ProfileTitle / ProfileDescription preserved.
     REQUIRE(model_xml.find("name=\"Title\">Test Project for reference<")            != std::string::npos);
     REQUIRE(model_xml.find("name=\"ProfileTitle\">Test profile name for reference<") != std::string::npos);
 
-    // Bonus: the two new invariant guards pass on the saved archive.
     std::string ax_err, cov_err;
     REQUIRE(bambu_cli::check_auxiliary_passthrough(src, out.string(), &ax_err));
     REQUIRE(ax_err.empty());
@@ -1698,7 +1761,7 @@ TEST_CASE("test_reference.3mf round-trip preserves canonical aux layout",
 }
 ```
 
-- [ ] **Step 5: Configure CMake (fixture macro changes require a re-config)**
+- [ ] **Step 5: Configure CMake (fixture macro requires a re-config)**
 
 ```
 cmake -B build -S .
@@ -1712,8 +1775,8 @@ Expected: build succeeds.
 build/tests/RelWithDebInfo/cli_tests.exe "[reference_passthrough]"
 ```
 Expected: PASS. If it fails:
-- "missing in post: Auxiliaries/Profile Pictures/..." → Task 4 cover plumbing isn't writing the right folder. Investigate `profile_set`.
-- DesignerCover metadata value drift → `store_bbs_3mf` is writing the full path instead of basename; revisit how `cover_file` is set in `info_set`.
+- "missing in post: Auxiliaries/Profile Pictures/..." → Task 3 cover plumbing isn't writing the right folder. Investigate `profile_set`.
+- DesignerCover metadata value drift → check `info_set`'s `cover_file` assignment is a basename.
 - Title/Description drift → unrelated; check existing config-roundtrip guard.
 
 - [ ] **Step 7: Run the full suite to confirm nothing regressed**
@@ -1721,7 +1784,7 @@ Expected: PASS. If it fails:
 ```
 build/tests/RelWithDebInfo/cli_tests.exe
 ```
-Expected: all green. Note the case + assertion count; the new tests added since master should bring it above the prior baseline of 235 cases / 1170 assertions.
+Expected: all green. The new tests should bring the count above the prior baseline of 235 cases / 1170 assertions.
 
 - [ ] **Step 8: Commit**
 
@@ -1735,30 +1798,20 @@ New fixture is a verbatim copy of a real Bambu Studio-produced 3MF.
 Asserts the load->store->reload cycle preserves canonical aux folder
 names (Model Pictures / Profile Pictures / Assembly Guide), file
 content byte-for-byte, cover metadata as basename-only references, and
-top-level Title/Description/ProfileTitle metadata. Also runs the two
-new invariant guards directly against the saved archive."
+top-level Title/ProfileTitle metadata. Also runs the two new invariant
+guards directly against the saved archive."
 ```
 
 ---
 
-## Task 10: Refresh CLAUDE.md (remove stale aux-folder divergence note)
+## Task 9: Refresh CLAUDE.md
 
 **Files:**
 - Modify: `CLAUDE.md`
 
-The current note at top-level CLAUDE.md states Bambu uses `Pictures / Bom / AssemblyGuide / Others` and warns the next agent NOT to "normalize." That note is wrong (it was documenting a CLI bug as if it were intentional). We replace it with a correct note.
+- [ ] **Step 1: Update the aux-folder bullet**
 
-- [ ] **Step 1: Update the aux-folder bullet in `CLAUDE.md`**
-
-In the `## Sibling-fork divergences — LEGITIMATE, do not try to "fix"` section, find the `**Aux folder names:**` bullet:
-
-```
-- **Aux folder names:** Bambu uses `Pictures` / `Bom` / `AssemblyGuide` /
-  `Others` (TitleCase) reflecting the BBS `Auxiliaries/` dir naming; Orca
-  uses lowercase hyphenated. Do not "normalize."
-```
-
-Replace with:
+In `CLAUDE.md`, find the `## Sibling-fork divergences — LEGITIMATE, do not try to "fix"` section and locate the `**Aux folder names:**` bullet (text currently begins `Bambu uses` Pictures / Bom / AssemblyGuide / Others ``). Replace the entire bullet with:
 
 ```
 - **Aux folder names:** Bambu's canonical layout is `Model Pictures` /
@@ -1780,13 +1833,12 @@ git commit -m "docs(claude.md): correct aux-folder divergence note
 
 The previous note documented a CLI bug as if it were a deliberate
 divergence and told future agents not to normalize. Replace with the
-actual canonical layout (Model Pictures / Profile Pictures / Bill of
-Materials / Assembly Guide / Others) and a pointer to the new note."
+actual canonical layout and a pointer to the new note."
 ```
 
 ---
 
-## Task 11: New notes file + status.md entry
+## Task 10: New notes file + status.md entry
 
 **Files:**
 - Create: `docs/cli/notes/2026-05-26-aux-folder-canonical-layout.md`
@@ -1835,7 +1887,9 @@ After this change:
   Users can delete it explicitly via `project aux remove --folder
   model-pictures --name X.jpg`.
 - `--cover-name NAME` (new) picks an existing image in the folder as
-  the cover without re-embedding. Sanitized via `sanitize_aux_name`.
+  the cover without re-embedding. Validation (mutual exclusion with
+  `--cover`, `sanitize_aux_name`) happens at the CLI layer; the ops
+  layer trusts its inputs.
 
 ## Why this matters
 
@@ -1857,7 +1911,7 @@ note points here.
 
 - [ ] **Step 2: Update `docs/cli/status.md`**
 
-Open `docs/cli/status.md` and append a new section at the end (matching the existing milestone-block format):
+Open `docs/cli/status.md` and append at the end:
 
 ```markdown
 ## Phase G — Canonical aux folder layout (2026-05-26)
@@ -1865,7 +1919,8 @@ Open `docs/cli/status.md` and append a new section at the end (matching the exis
 - [x] AuxFolder enum renamed to canonical names (`ModelPictures`,
       `ProfilePictures`, `BillOfMaterials`, `AssemblyGuide`, `Others`).
 - [x] DesignerCover / ProfileCover decoupled into own folders + own basenames.
-- [x] `--cover-name` selects existing image in folder.
+- [x] `--cover-name` selects existing image in folder; mutual exclusion +
+      `sanitize_aux_name` enforced at CLI layer.
 - [x] PNG + JPEG accepted (via `is_png_or_jpeg`).
 - [x] `check_auxiliary_passthrough` + `check_cover_references_resolve`
       invariant guards live in the save path.
@@ -1894,29 +1949,54 @@ is the manual Bambu Studio GUI smoke (carried over from M0-M10)."
 
 After all tasks land:
 
-1. **Spec coverage** — each numbered item in the spec maps to:
-   - §3.1 enum → Task 3
-   - §3.2 flag/JSON/subdir mapping → Tasks 2 (pin), 3 (implement)
-   - §3.3 `--cover-name` → Tasks 4 (ops), 5 (CLI)
-   - §3.4 clear-cover behavior change → Task 4
-   - §4 internals → Task 4
-   - §5.1 invariants → Task 9 (round-trip asserts)
-   - §5.2 guards → Tasks 6, 7, 8
-   - §6 tests → Tasks 1, 2, 4, 5, 6, 7, 9
+1. **Spec coverage**:
+   - §1 corrected "CLI today" table → Task 9 + Task 10 (CLAUDE.md + notes file)
+   - §3.1 enum → Task 2
+   - §3.2 flag/JSON/subdir mapping → Task 2
+   - §3.3 `--cover-name` + layering of validation → Task 3 (ops), Task 4 (CLI exit-code semantics)
+   - §3.4 clear-cover behavior change → Task 3
+   - §4 internals → Task 3
+   - §5.1 invariants → Task 8 (round-trip asserts)
+   - §5.2 guards → Tasks 5, 6, 7
+   - §6 tests → Tasks 1, 2, 3, 4, 5, 6, 8
    - §7 files touched → all tasks
-   - Docs (§7 last block) → Tasks 10, 11
+   - Docs (§7 last block) → Tasks 9, 10
 
-2. **Placeholder scan** — none. Every step has either real code or an exact command + expected output.
+2. **Placeholder scan**: every step has either real code or an exact command + expected output. Anchor strings replace line numbers throughout (e.g. "find `static AuxFolder parse_folder`" instead of "lines 247-255").
 
-3. **Type consistency** — `AuxFolder` enum names match across header / cpp / tests. `InfoSetParams::cover_name` / `ProfileSetParams::cover_name` defined in Task 4 Step 1 and used in Tasks 4, 5. `detail::is_png_or_jpeg` declared Task 1 Step 3 and used in Task 4 Step 5. `detail::embed_image_into_folder` / `require_image_in_folder` declared Task 4 Step 1, defined Task 4 Step 5, used Task 4 Step 6 + 7. `check_auxiliary_passthrough` declared Task 6 Step 4, defined Task 6 Step 5, used Tasks 8, 9. `check_cover_references_resolve` declared Task 7 Step 4, defined Task 7 Step 5, used Tasks 8, 9.
+3. **Type consistency**:
+   - `AuxFolder` enum names: `ModelPictures` / `ProfilePictures` / `BillOfMaterials` / `AssemblyGuide` / `Others` — pinned in Task 2 Step 1 test, defined in Task 2 Step 2 header, used everywhere downstream.
+   - `InfoSetParams::cover_name` / `ProfileSetParams::cover_name` — added in Task 3 Step 1, populated by Task 3 Steps 6-7 (ops layer trust contract) and Task 4 Steps 4-5 (CLI layer validation).
+   - `detail::is_png_or_jpeg` — declared Task 1 Step 3, used in `detail::embed_image_into_folder` body in Task 3 Step 5.
+   - `detail::embed_image_into_folder` / `require_image_in_folder` — declared Task 3 Step 1, defined Task 3 Step 5, used Task 3 Steps 6-7.
+   - `check_auxiliary_passthrough` — declared Task 5 Step 3, defined Task 5 Step 4, wired Task 7 Step 2, used directly in Task 8 round-trip.
+   - `check_cover_references_resolve` — declared Task 6 Step 3, defined Task 6 Step 4, wired Task 7 Step 2, used directly in Task 8 round-trip.
 
 ---
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-05-26-canonical-aux-layout.md`. Two execution options:
+Plan complete and saved to `docs/superpowers/plans/2026-05-26-canonical-aux-layout.md`.
 
-1. **Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration.
-2. **Inline Execution** — I execute tasks in this session using executing-plans, batch execution with checkpoints.
+**Task dependency graph:**
+```
+1 → 2 → 3 → 4 → 8 → 9, 10
+        ↘ 5 ↘
+          6 ↘
+            7 → 8
+```
+- Task 1 is standalone.
+- Task 2 depends on Task 1 (uses `detail::` namespace).
+- Task 3 depends on Task 2 (enum names).
+- Task 4 depends on Task 3 (cover_name field in InfoSetParams/ProfileSetParams).
+- Tasks 5 and 6 are independent of each other; both can start after Task 4.
+- Task 7 depends on 5 and 6.
+- Task 8 depends on Tasks 3 (canonical folders), 5, 6, 7.
+- Tasks 9 and 10 depend on Task 8 (docs reference the test fixture).
 
-Which approach?
+So 5/6 are the only pair that can run in parallel; the rest is sequential. Two execution options:
+
+1. **Subagent-Driven** — Dispatch one subagent per task, sequentially, with a review checkpoint after each commit. Tasks 5 and 6 may be dispatched in parallel as the lone parallelism opportunity. Best when you want isolated context per task and review gates.
+2. **Inline Execution** — Execute tasks in this session using executing-plans, with checkpoints after each commit. Faster when the parallelism gain is limited (only 5+6 here) and the surface is well-bounded.
+
+Neither is the obvious default given the near-linear chain. Pick based on whether you want review checkpoints per task (subagent) or batched checkpoints (inline).
