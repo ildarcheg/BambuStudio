@@ -246,15 +246,11 @@ bool check_cover_references_resolve(const std::string& post_path,
 
 ### 6.3 Fixture
 
-`tests/cli/fixtures/local/test_reference.3mf` — copy of the user-supplied
-file. ~4.5 MB (PDF dominates at ~4 MB).
-
-**Open question for the user:** keep the full fixture, or synthesize a
-minimal equivalent (1 KB stub PDF, 1 KB JPG covers) to keep the repo lean?
-Recommendation: keep the original — it's a real Bambu-produced file and
-its structural fingerprint is what the round-trip test is actually
-validating. A synthetic stand-in could pass while still missing real
-Bambu-isms. To be confirmed.
+`tests/cli/fixtures/local/test_reference.3mf` — verbatim copy of the
+user-supplied file. ~4.5 MB (the embedded `D_02_40sw_PRINT_GUIDE.pdf`
+dominates at ~4 MB). Kept full-fidelity because a real Bambu-produced
+file is what we are validating structural equivalence against; a
+synthetic stand-in could pass while still missing real Bambu-isms.
 
 ## 7. Files touched
 
