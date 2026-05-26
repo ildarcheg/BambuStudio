@@ -31,6 +31,21 @@ static bool check_png_signature(const std::string& path) {
     return f.gcount() == 8 && std::memcmp(sig, kPngSignature, 8) == 0;
 }
 
+namespace detail {
+
+bool is_png_or_jpeg(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    uint8_t hdr[8] = {};
+    f.read(reinterpret_cast<char*>(hdr), 8);
+    const auto n = f.gcount();
+    if (n >= 8 && std::memcmp(hdr, "\x89PNG\r\n\x1A\n", 8) == 0) return true;
+    if (n >= 3 && hdr[0] == 0xFF && hdr[1] == 0xD8 && hdr[2] == 0xFF) return true;
+    return false;
+}
+
+} // namespace detail
+
 // Ensure model.model_info is non-null and return a reference.
 static Slic3r::ModelInfo& ensure_model_info(Slic3r::Model& model) {
     if (!model.model_info)

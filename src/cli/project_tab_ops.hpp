@@ -133,4 +133,11 @@ void aux_export(ProjectState& state, AuxFolder folder,
 // CON PRN AUX NUL COM1-COM9 LPT1-LPT9.
 std::string sanitize_aux_name(const std::string& raw);
 
+namespace detail {
+    // Returns true if <path> begins with the PNG magic (89 50 4E 47 0D 0A 1A 0A)
+    // or the JPEG SOI sequence (FF D8 FF). Returns false on read failure,
+    // truncation (<3 bytes), or any other signature.
+    bool is_png_or_jpeg(const std::string& path);
+}
+
 } // namespace bambu_cli
