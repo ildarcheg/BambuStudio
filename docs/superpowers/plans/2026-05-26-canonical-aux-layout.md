@@ -152,7 +152,17 @@ TEST_CASE("is_png_or_jpeg: rejects nonexistent path",
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Register the test in CMake**
+
+Edit `tests/cli/CMakeLists.txt`. In `BAMBU_CLI_TEST_SOURCES`, find the existing line `unit/test_png_placeholder.cpp` and insert directly after it:
+
+```cmake
+    unit/test_image_signature.cpp
+```
+
+(Step ordering note: registering in CMake before adding the declaration is what makes the red phase observable below — otherwise the build target wouldn't compile the test file and we'd see a false green.)
+
+- [ ] **Step 3: Run test to verify it fails**
 
 Build, then:
 ```
@@ -161,7 +171,7 @@ build/tests/RelWithDebInfo/cli_tests.exe "[image_signature]"
 ```
 Expected: build fails — `bambu_cli::detail::is_png_or_jpeg` not declared.
 
-- [ ] **Step 3: Add the `detail` namespace + declaration to `project_tab_ops.hpp`**
+- [ ] **Step 4: Add the `detail` namespace + declaration to `project_tab_ops.hpp`**
 
 In `src/cli/project_tab_ops.hpp`, find the closing `} // namespace bambu_cli` at the bottom of the file. Immediately before it, insert:
 
@@ -174,7 +184,7 @@ namespace detail {
 }
 ```
 
-- [ ] **Step 4: Implement `is_png_or_jpeg` in `project_tab_ops.cpp`**
+- [ ] **Step 5: Implement `is_png_or_jpeg` in `project_tab_ops.cpp`**
 
 In `src/cli/project_tab_ops.cpp`, find the existing `check_png_signature` static helper (it begins with `static const uint8_t kPngSignature[8]` and `static bool check_png_signature`). Immediately below the `check_png_signature` function body, add:
 
@@ -196,14 +206,6 @@ bool is_png_or_jpeg(const std::string& path) {
 ```
 
 `check_png_signature` itself stays for now; it is removed in Task 3.
-
-- [ ] **Step 5: Register the test in CMake**
-
-Edit `tests/cli/CMakeLists.txt`. In `BAMBU_CLI_TEST_SOURCES`, find the existing line `unit/test_png_placeholder.cpp` and insert directly after it:
-
-```cmake
-    unit/test_image_signature.cpp
-```
 
 - [ ] **Step 6: Run test to verify it passes**
 
