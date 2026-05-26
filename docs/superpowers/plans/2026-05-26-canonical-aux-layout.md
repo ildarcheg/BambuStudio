@@ -778,30 +778,44 @@ std::string profile_clear(ProjectState& state, const std::vector<std::string>& f
 
 - [ ] **Step 8: Update existing cover tests in test_project_info_ops.cpp**
 
-Open `tests/cli/unit/test_project_info_ops.cpp` and find every test that exercises `--cover` or `clear cover` on the info side:
-- Replace expected `model_info->cover_file == "cover.png"` with the basename of whatever path the test sets (e.g. `"cover_smoke.png"` if the test uses `kPng`).
-- Replace existence assertions on `<aux>/Model Pictures/cover.png` with `<aux>/Model Pictures/<basename>`.
-- Tests asserting that `info clear cover` deletes the on-disk file → flip the assertion: the file STILL EXISTS after clear. Only the metadata pointer is blanked.
-- Tests whose premise is "designer and profile share a single cover.png" → delete entirely. `test_cover_decoupling.cpp` already provides positive coverage of independence.
+Open `tests/cli/unit/test_project_info_ops.cpp`. These specific tests need work (root-cause traced to commit 7eb7b11f9 which changed embed paths without updating tests; pre-existing failures on master before this task):
+
+1. **`TEST_CASE("info_set --cover valid PNG: sets cover_file path", ...)`** (around line 73) — currently fails: assertion `cover_file == "Auxiliaries/cover.png"`. Change to `cover_file == "cover_smoke.png"` (the kPng basename).
+2. **`TEST_CASE("info_set --cover JPG: throws BadCoverImage", ...)`** (around line 85) — currently passing on master, but will fail after this task makes JPEG acceptable. **Invert the assertion:** rename the test to `"info_set --cover JPG: accepted"` and replace `REQUIRE_THROWS_AS(...)` with `REQUIRE_NOTHROW(bambu_cli::info_set(s, p));` plus `REQUIRE(s.model.model_info->cover_file == "cover_smoke.jpg");`.
+3. **The three "cover refcount" tests** (around lines 168, 195, 216) — premise gone. Delete entirely. `test_cover_decoupling.cpp` already provides positive coverage of independence and clear-cover-leaves-file behavior.
+4. Any remaining test asserting `<aux>/cover.png` exists → update to `<aux>/Model Pictures/<basename>`. (The `landed` paths in deleted refcount tests vanish with the tests; if any other test references a `landed` path, fix it.)
 
 - [ ] **Step 9: Update existing cover tests in test_project_profile_ops.cpp**
 
-Open `tests/cli/unit/test_project_profile_ops.cpp`. For every test that exercises `--cover` or `clear cover`:
-- Replace expected `profile_info->ProfileCover == "cover.png"` with the basename of the source path (e.g. `"cover_smoke.png"`).
-- Replace any existence assertion on `<aux>/Model Pictures/cover.png` with `<aux>/Profile Pictures/<basename>` — the profile cover now lives in its own folder.
-- Tests asserting shared-cover refcount deletion → flip: the file STILL EXISTS after `profile clear cover`.
-- Tests asserting "designer + profile share a file" → delete.
+Open `tests/cli/unit/test_project_profile_ops.cpp`. Specific tests:
 
-- [ ] **Step 10: Build and run cover tests**
+1. **`TEST_CASE("profile_set --cover valid PNG: sets ProfileCover path", ...)`** (around line 61) — currently fails: assertion `ProfileCover == "Auxiliaries/cover.png"`. Change to `ProfileCover == "cover_smoke.png"`.
+2. **`TEST_CASE("profile_set --cover JPG: throws BadCoverImage", ...)`** (around line 72) — currently passing; will fail after this task. Invert as in info side: rename to `"...JPG: accepted"`, swap `REQUIRE_THROWS_AS` for `REQUIRE_NOTHROW` + a basename assertion (`"cover_smoke.jpg"`).
+3. Any test asserting `<aux>/Model Pictures/cover.png` exists for profile cover → update to `<aux>/Profile Pictures/<basename>` (profile cover now lives in its own folder).
+
+- [ ] **Step 10: Update the roundtrip cover assertion in test_project_tab.cpp**
+
+This was missed by Task 2 Step 8 (which only renamed enum references). Currently failing on master: `tests/cli/roundtrip/test_project_tab.cpp:87` asserts `s.model.model_info->cover_file == "Auxiliaries/cover.png"`. Update the relevant lines:
+
+```cpp
+    REQUIRE(s.model.model_info->cover_file == "cover_smoke.png");
+    const fs::path landed = fs::path(s.model.get_auxiliary_file_temp_path()) / "Model Pictures" / "cover_smoke.png";
+    REQUIRE(fs::exists(landed));
+    REQUIRE(read_all(landed) == src_bytes);
+```
+
+(And update the divergence comment on lines 85-86 to reference the new layout instead of `"Auxiliaries/cover.png"`.)
+
+- [ ] **Step 11: Build and run cover tests**
 
 ```
 cmake --build build --target cli_tests --config Release --parallel 2
 build/tests/cli/Release/cli_tests.exe "[cover_decouple]"
 build/tests/cli/Release/cli_tests.exe "[unit]"
 ```
-Expected: all green.
+Expected: all green. (Unit suite count drops from 8 pre-existing failures to 0 in the touched test files; e2e cover failures still present until Task 4 Step 6+.)
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```
 git add -u src/ tests/
@@ -814,7 +828,12 @@ its own basename in metadata. Removed the shared-cover.png refcount
 machinery. info/profile_clear cover now blanks the metadata pointer
 only — the on-disk image stays as a normal aux entry. JPEG accepted
 alongside PNG via is_png_or_jpeg. Mutual exclusion + name sanitization
-of cover_name remain to be wired at the CLI layer in Task 4."
+of cover_name remain to be wired at the CLI layer in Task 4.
+
+Also updates existing cover tests (info_ops, profile_ops, and the
+roundtrip test_project_tab cover assertion) that were left broken
+by commit 7eb7b11f9 when it changed the embed path without updating
+the tests."
 ```
 
 ---
@@ -1016,7 +1035,44 @@ In the same callback, update the empty-args check + param assembly:
 
 (Add `#include "../exceptions.hpp"` to the top of `commands/project_tab.cpp` if it isn't already present — `AuxNameError` lives there.)
 
-- [ ] **Step 6: Add e2e tests for mutual exclusion and sanitization (CLI layer)**
+- [ ] **Step 6: Fix existing e2e cover tests broken by commit 7eb7b11f9**
+
+These tests have been failing on master since commit `7eb7b11f9` changed the embed path. They live in files Task 4 already touches in Step 6 (now Step 7) for new appends, so we fix them in the same task.
+
+In `tests/cli/e2e/test_project_info.cpp`:
+
+1. **`TEST_CASE("info set --cover PNG: cover is embedded in archive", ...)`** (around line 75) — reads `Auxiliaries/cover.png` from the zip. Replace the entry name with `Auxiliaries/Model Pictures/cover_smoke.png` (the kPng basename) and update the descriptive comment accordingly.
+   ```cpp
+       // The PNG bytes should now be in the archive under Auxiliaries/Model Pictures/<basename>.
+       auto bytes = read_zip_entry(out, "Auxiliaries/Model Pictures/cover_smoke.png");
+   ```
+2. **`TEST_CASE("info set --cover JPG: rejected with exit 4 (bad PNG)", ...)`** (around line 95) — premise reversed by this work: JPEG is now accepted. Rewrite to assert success + archive presence:
+   ```cpp
+   TEST_CASE("info set --cover JPG: accepted, embedded in Profile/Model Pictures",
+             "[c1][info_set_cover]") {
+       REQUIRE(fs::exists(kJpg));
+       const std::string out = fresh_temp_path(".3mf");
+       fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
+
+       auto r = spawn_cli({"project", "info", "set", out, "--cover", kJpg});
+       INFO("stderr: " << r.stderr_text);
+       REQUIRE(r.exit_code == 0);
+
+       auto bytes = read_zip_entry(out, "Auxiliaries/Model Pictures/cover_smoke.jpg");
+       REQUIRE_FALSE(bytes.empty());
+       REQUIRE(bytes.size() >= 3);
+       REQUIRE(bytes[0] == 0xFF);
+       REQUIRE(bytes[1] == 0xD8);
+       REQUIRE(bytes[2] == 0xFF);
+   }
+   ```
+
+In `tests/cli/e2e/test_project_profile.cpp`:
+
+3. **`TEST_CASE("profile set --cover PNG: cover embedded in archive", ...)`** (around line 70) — reads `Auxiliaries/cover.png`. Replace with `Auxiliaries/Profile Pictures/cover_smoke.png`. Note the folder is `Profile Pictures`, not `Model Pictures` — profile covers go into their own folder.
+4. **The profile-side JPG rejection test** (around line 86) — same inversion as #2 above, but archive path is `Auxiliaries/Profile Pictures/cover_smoke.jpg`.
+
+- [ ] **Step 7: Add e2e tests for mutual exclusion and sanitization (CLI layer)**
 
 Open `tests/cli/e2e/test_project_info.cpp`. Append two new TEST_CASEs at the end:
 
@@ -1096,7 +1152,7 @@ TEST_CASE("profile set: --cover-name with path separator fails with exit 1",
 
 (Both e2e files already include `test_helpers.hpp` and have the `using namespace bambu_cli_test` precedent — match the existing style.)
 
-- [ ] **Step 7: Build the CLI binary + sanity-check help text**
+- [ ] **Step 8: Build the CLI binary + sanity-check help text**
 
 ```
 cmake --build build --target bambu-cli --config Release --parallel 2
@@ -1105,16 +1161,16 @@ build/src/cli/Release/bambu-cli.exe project profile set --help
 ```
 Expected: both `--cover` and `--cover-name` listed in help with their new descriptions.
 
-- [ ] **Step 8: Run all tests**
+- [ ] **Step 9: Run all tests**
 
 ```
 cmake --build build --target cli_tests --config Release --parallel 2
 build/tests/cli/Release/cli_tests.exe "[cover_name]"
 build/tests/cli/Release/cli_tests.exe
 ```
-Expected: unit `[cover_name]` 3 sections green; e2e `[cover_name]` 4 sections green; full suite green.
+Expected: unit `[cover_name]` 3 sections green; e2e `[cover_name]` 4 sections green; full suite green (the 8 pre-existing failures from commit 7eb7b11f9 are all addressed by the end of this task — 6 in Task 3, 2 in this task's Step 6).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```
 git add -u src/ tests/
@@ -1979,7 +2035,7 @@ After all tasks land:
 3. **Type consistency**:
    - `AuxFolder` enum names: `ModelPictures` / `ProfilePictures` / `BillOfMaterials` / `AssemblyGuide` / `Others` — pinned in Task 2 Step 1 test, defined in Task 2 Step 2 header, used everywhere downstream.
    - `InfoSetParams::cover_name` / `ProfileSetParams::cover_name` — added in Task 3 Step 1, populated by Task 3 Steps 6-7 (ops layer trust contract) and Task 4 Steps 4-5 (CLI layer validation).
-   - `detail::is_png_or_jpeg` — declared Task 1 Step 3, used in `detail::embed_image_into_folder` body in Task 3 Step 5.
+   - `detail::is_png_or_jpeg` — declared Task 1 Step 4, used in `detail::embed_image_into_folder` body in Task 3 Step 5.
    - `detail::embed_image_into_folder` / `require_image_in_folder` — declared Task 3 Step 1, defined Task 3 Step 5, used Task 3 Steps 6-7.
    - `check_auxiliary_passthrough` — declared Task 5 Step 3, defined Task 5 Step 4, wired Task 7 Step 2, used directly in Task 8 round-trip.
    - `check_cover_references_resolve` — declared Task 6 Step 3, defined Task 6 Step 4, wired Task 7 Step 2, used directly in Task 8 round-trip.
