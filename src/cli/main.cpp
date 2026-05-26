@@ -5,6 +5,9 @@
 #include "json_output.hpp"
 
 #include <iostream>
+#include <cstdlib>
+#include <boost/filesystem.hpp>
+#include <libslic3r/Utils.hpp>
 
 namespace bambu_cli {
 void register_project_subcommands(CLI::App& app, OutputMode* mode_out);
@@ -15,6 +18,14 @@ void register_config_subcommands(CLI::App& app, OutputMode* mode_out);
 }
 
 int main(int argc, char** argv) {
+    // Initialise temp dir so Model::get_backup_path() doesn't write to "/"
+    std::string tmp;
+    if (const char* env = std::getenv("TMPDIR"))
+        tmp = env;
+    else
+        tmp = boost::filesystem::temp_directory_path().string();
+    Slic3r::set_temporary_dir(tmp);
+
     CLI::App app{"bambu-cli -- compose .3mf project files for Bambu Studio"};
     app.set_version_flag("--version", "bambu-cli 0.1.0");
 

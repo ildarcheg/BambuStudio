@@ -56,8 +56,9 @@ static void embed_cover(Slic3r::Model& model,
     if (!check_png_signature(on_disk_path))
         throw BadCoverImage("cover must be PNG (signature mismatch): " + on_disk_path);
     const std::string aux_dir = model.get_auxiliary_file_temp_path();
-    fs::create_directories(aux_dir);
-    const std::string dest = aux_dir + "/cover.png";
+    const std::string model_pics_dir = aux_dir + "/Model Pictures";
+    fs::create_directories(model_pics_dir);
+    const std::string dest = model_pics_dir + "/cover.png";
     fs::copy_file(on_disk_path, dest, fs::copy_options::overwrite_existing);
     field_out = archive_entry;
 }
@@ -75,7 +76,7 @@ static bool profile_cover_empty(const Slic3r::Model& model) {
 }
 static void delete_cover_file_if_unreferenced(Slic3r::Model& model) {
     if (!info_cover_empty(model) || !profile_cover_empty(model)) return;
-    const fs::path landed = fs::path(model.get_auxiliary_file_temp_path()) / "cover.png";
+    const fs::path landed = fs::path(model.get_auxiliary_file_temp_path()) / "Model Pictures" / "cover.png";
     boost::system::error_code ec;
     fs::remove(landed, ec);  // best-effort; absent file is a no-op
 }
@@ -117,7 +118,7 @@ std::string info_set(ProjectState& state, const InfoSetParams& p) {
     if (p.license)     mi.license     = *p.license;
     if (p.copyright)   mi.copyright   = *p.copyright;
     if (p.cover_path)
-        embed_cover(state.model, *p.cover_path, mi.cover_file, "Auxiliaries/cover.png");
+        embed_cover(state.model, *p.cover_path, mi.cover_file, "cover.png");
     return "applied info edits";
 }
 
@@ -166,7 +167,7 @@ std::string profile_set(ProjectState& state, const ProfileSetParams& p) {
     if (p.title)       pi.ProfileTile        = *p.title;
     if (p.description) pi.ProfileDescription = *p.description;
     if (p.cover_path)
-        embed_cover(state.model, *p.cover_path, pi.ProfileCover, "Auxiliaries/cover.png");
+        embed_cover(state.model, *p.cover_path, pi.ProfileCover, "cover.png");
     return "applied profile edits";
 }
 
