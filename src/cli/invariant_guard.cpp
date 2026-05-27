@@ -2,13 +2,16 @@
 #include "io.hpp"
 
 #include "libslic3r/miniz_extension.hpp"
+#include "libslic3r/Model.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Format/bbs_3mf.hpp"
 
+#include <boost/filesystem.hpp>
 #include <miniz.h>
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
@@ -197,57 +200,99 @@ GuardResult run_guard(const std::string& saved_path, const ProjectState& state) 
 
     if (!check_config_roundtrip(saved_path, state, gr)) return gr;
 
+    // (d) auxiliary passthrough — compares the in-memory aux temp dir
+    // (what store_bbs_3mf walks) against the saved archive. Catches save-path
+    // bugs without false-positiving on intentional aux mutations.
+    {
+        // get_auxiliary_file_temp_path is non-const in libslic3r; const_cast is
+        // the established pattern in this file's callers (see io.cpp where
+        // store_bbs_3mf gets a const_cast Model*).
+        const std::string aux_dir =
+            const_cast<Slic3r::Model&>(state.model).get_auxiliary_file_temp_path();
+        std::string ax_err;
+        if (!check_auxiliary_passthrough(aux_dir, saved_path, &ax_err)) {
+            gr.failed_check   = "auxiliary_passthrough";
+            gr.failure_detail = ax_err;
+            return gr;
+        }
+    }
+
+    // (e) cover references resolve.
+    {
+        std::string cov_err;
+        if (!check_cover_references_resolve(saved_path, &cov_err)) {
+            gr.failed_check   = "cover_references_resolve";
+            gr.failure_detail = cov_err;
+            return gr;
+        }
+    }
+
     gr.ok = true;
     return gr;
 }
 
 // ---- check_auxiliary_passthrough -------------------------------------------
 
-bool check_auxiliary_passthrough(const std::string& pre_path,
-                                 const std::string& post_path,
+bool check_auxiliary_passthrough(const std::string& aux_temp_dir,
+                                 const std::string& post_archive,
                                  std::string* err_out) {
+    namespace fs = boost::filesystem;
+
     auto fail = [err_out](std::string msg) {
         if (err_out) *err_out = std::move(msg);
         return false;
     };
     if (err_out) err_out->clear();
 
-    mz_zip_archive pre{}, post{};
-    if (!zip_open(pre_path,  pre))  return fail("cannot open pre archive: "  + pre_path);
+    // Empty / nonexistent aux temp dir = nothing to verify.
+    if (aux_temp_dir.empty() || !fs::exists(aux_temp_dir) ||
+        !fs::is_directory(aux_temp_dir))
+        return true;
+
+    mz_zip_archive post{};
+    if (!zip_open(post_archive, post))
+        return fail("cannot open post archive: " + post_archive);
     struct ScopedClose {
         mz_zip_archive* z;
         ~ScopedClose() { zip_close(*z); }
-    } close_pre{&pre};
-    if (!zip_open(post_path, post)) return fail("cannot open post archive: " + post_path);
-    ScopedClose close_post{&post};
+    } close_post{&post};
 
-    auto read_bytes = [](mz_zip_archive& zip, mz_uint idx, std::string& out) -> bool {
+    const fs::path root(aux_temp_dir);
+    boost::system::error_code walk_ec;
+    for (fs::recursive_directory_iterator it(root, walk_ec), end;
+         it != end; it.increment(walk_ec)) {
+        if (walk_ec) return fail("walk error: " + walk_ec.message());
+        const fs::path& p = it->path();
+        if (!fs::is_regular_file(p)) continue;
+
+        // Compute relative path; normalize separators to '/'.
+        const fs::path rel = fs::relative(p, root);
+        std::string rel_str = rel.generic_string();   // forward slashes
+        const std::string archive_path = "Auxiliaries/" + rel_str;
+
+        const int idx = mz_zip_reader_locate_file(&post, archive_path.c_str(),
+                                                  nullptr, 0);
+        if (idx < 0) return fail("missing in post: " + archive_path);
+
         mz_zip_archive_file_stat st;
-        if (!mz_zip_reader_file_stat(&zip, idx, &st)) return false;
-        out.resize(static_cast<size_t>(st.m_uncomp_size));
-        if (st.m_uncomp_size == 0) return true;
-        return mz_zip_reader_extract_to_mem(&zip, idx, &out[0],
-                                            static_cast<size_t>(st.m_uncomp_size), 0);
-    };
+        if (!mz_zip_reader_file_stat(&post, static_cast<mz_uint>(idx), &st))
+            return fail("stat failed for post: " + archive_path);
 
-    const mz_uint n_pre = mz_zip_reader_get_num_files(&pre);
-    for (mz_uint i = 0; i < n_pre; ++i) {
-        char name_buf[1024] = {};
-        mz_zip_reader_get_filename(&pre, i, name_buf, sizeof(name_buf));
-        std::string name = name_buf;
-        if (name.rfind("Auxiliaries/", 0) != 0) continue;
-        if (mz_zip_reader_is_file_a_directory(&pre, i)) continue;
+        // Read both sides into memory and compare.
+        std::ifstream in(p.string(), std::ios::binary);
+        if (!in) return fail("cannot open temp file: " + p.string());
+        std::string disk_bytes((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
 
-        const int idx_post = mz_zip_reader_locate_file(&post, name.c_str(), nullptr, 0);
-        if (idx_post < 0) return fail("missing in post: " + name);
+        std::string post_bytes(static_cast<size_t>(st.m_uncomp_size), '\0');
+        if (st.m_uncomp_size > 0 &&
+            !mz_zip_reader_extract_to_mem(&post, static_cast<mz_uint>(idx),
+                                          &post_bytes[0],
+                                          static_cast<size_t>(st.m_uncomp_size), 0))
+            return fail("read failed for post: " + archive_path);
 
-        std::string pre_bytes, post_bytes;
-        if (!read_bytes(pre,  i,                              pre_bytes))
-            return fail("read failed for pre: "  + name);
-        if (!read_bytes(post, static_cast<mz_uint>(idx_post), post_bytes))
-            return fail("read failed for post: " + name);
-        if (pre_bytes != post_bytes)
-            return fail("content drift: " + name);
+        if (disk_bytes != post_bytes)
+            return fail("content drift: " + archive_path);
     }
     return true;
 }

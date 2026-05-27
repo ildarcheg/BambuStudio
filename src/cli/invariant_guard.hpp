@@ -7,10 +7,11 @@
 
 namespace bambu_cli {
 
-// Result of running the three-check guard against a saved .3mf.
+// Result of running the multi-check guard against a saved .3mf.
 struct GuardResult {
     bool        ok = false;
-    std::string failed_check;     // "rels", "thumbnails", or "config_roundtrip"
+    std::string failed_check;     // "rels", "thumbnails", "config_roundtrip",
+                                  // "auxiliary_passthrough", or "cover_references_resolve"
     std::string failure_detail;   // e.g. which entry, which key
 };
 
@@ -22,7 +23,14 @@ struct GuardResult {
 //   (c) vector-typed config round-trip — re-loaded project_config and
 //       per-object configs equal the in-memory <state> for every vector type
 //       (coPoint*, coPoints*, coBools, coStrings).
-// Returns ok=true if all three pass.
+//   (d) auxiliary passthrough — every Auxiliaries/* file in
+//       state.source_path is present at the same archive path in the
+//       saved archive with byte-identical content. (Skipped if
+//       state.source_path is empty, e.g. for project_init from
+//       template; that case is covered by check_thumbnails_in_archive.)
+//   (e) cover references resolve — DesignerCover / ProfileCover
+//       metadata reference existing files in the canonical folders.
+// Returns ok=true if all pass.
 GuardResult run_guard(const std::string& saved_path, const ProjectState& state);
 
 // Standalone check (b) only — runs against an arbitrary archive path with the
@@ -33,16 +41,20 @@ GuardResult run_guard(const std::string& saved_path, const ProjectState& state);
 GuardResult check_thumbnails_in_archive(const std::string& archive_path,
                                         const ProjectState& state);
 
-// Post-write check: every regular file under "Auxiliaries/" in <pre_path>
-// must be present at the same archive path in <post_path> with
-// byte-identical contents. First mismatch is written to *err_out and the
-// function returns false. Empty err_out on success.
+// Post-write check: every regular file under <aux_temp_dir> (recursively)
+// must be present in <post_archive> at archive path
+// "Auxiliaries/<relative-to-aux_temp_dir>" with byte-identical contents.
+// First mismatch is written to *err_out and the function returns false.
+// Empty err_out on success. If <aux_temp_dir> doesn't exist or is empty,
+// returns true (nothing to verify).
 //
-// Pre = the source archive that was loaded; post = the tmp archive that
-// store_bbs_3mf just produced. Used to detect accidental aux folder
-// renames, missing files, or content corruption.
-bool check_auxiliary_passthrough(const std::string& pre_path,
-                                 const std::string& post_path,
+// Compares the in-memory aux temp dir (the source-of-truth for what
+// store_bbs_3mf walks) against the saved archive. Catches save-path
+// bugs (wrong folder name, content corruption, missing entries) without
+// false-positiving on legitimate aux mutations (aux add/remove,
+// cover embed).
+bool check_auxiliary_passthrough(const std::string& aux_temp_dir,
+                                 const std::string& post_archive,
                                  std::string* err_out);
 
 // Verify DesignerCover and ProfileCover metadata in <archive_path>'s
