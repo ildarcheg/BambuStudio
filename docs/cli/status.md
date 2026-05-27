@@ -566,6 +566,14 @@ objects** (the group matched by `--name`) receive the extruder stamp. Throws
 - [x] `tests/cli/fixtures/test_reference.3mf` committed; round-trip
       test asserts canonical layout preservation (43 assertions).
 - [x] Final suite: **266 cases / 1307 assertions / 0 failures**.
-- [ ] Manual GUI smoke: open a CLI-produced 3MF in Bambu Studio and
-      confirm the Project tab renders Model Pictures / Profile Pictures
-      / Assembly Guide tabs correctly with the embedded covers and PDF.
+- [x] Manual GUI smoke (2026-05-27): user opened
+      `smoke-out/02_full_build.3mf` in Bambu Studio and confirmed all
+      Project tab fields populate (title, description, license,
+      copyright, profile title, profile description), both real-image
+      covers render (SAMPLE designer cover, ORIGINAL profile cover),
+      the 4 MB Assembly Guide PDF is clickable and opens in a PDF
+      viewer, Bill of Materials + Others files are listed, and the
+      `smoke_cube` object renders in the 3D view on `Plate 01 test`.
+      Build recipe: `bambu-cli object add` then `project info set`
+      then `project profile set` then three `project aux add` calls
+      with `--folder assembly-guide / bill-of-materials / others`.
