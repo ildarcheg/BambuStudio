@@ -548,3 +548,24 @@ objects** (the group matched by `--name`) receive the extruder stamp. Throws
 |---|---|
 | Phase E test growth | +6 assertions (216 cases / 1003→1009 assertions) |
 | Final suite | **216 cases / 1009 assertions / 0 failures** |
+
+## Phase G — Canonical aux folder layout (2026-05-26)
+
+- [x] AuxFolder enum renamed to canonical names (`ModelPictures`,
+      `ProfilePictures`, `BillOfMaterials`, `AssemblyGuide`, `Others`).
+- [x] DesignerCover / ProfileCover decoupled into own folders + own basenames.
+- [x] `--cover-name` selects existing image in folder; mutual exclusion +
+      `sanitize_aux_name` enforced at CLI layer.
+- [x] PNG + JPEG accepted (via `is_png_or_jpeg`).
+- [x] `check_auxiliary_passthrough` + `check_cover_references_resolve`
+      invariant guards live in the save path. `check_auxiliary_passthrough`
+      compares the in-memory aux temp dir against the saved archive
+      (redesigned during execution from the original pre-vs-post diff
+      to avoid false positives on legitimate `aux remove` / `aux add
+      --force` mutations).
+- [x] `tests/cli/fixtures/test_reference.3mf` committed; round-trip
+      test asserts canonical layout preservation (43 assertions).
+- [x] Final suite: **266 cases / 1307 assertions / 0 failures**.
+- [ ] Manual GUI smoke: open a CLI-produced 3MF in Bambu Studio and
+      confirm the Project tab renders Model Pictures / Profile Pictures
+      / Assembly Guide tabs correctly with the embedded covers and PDF.
