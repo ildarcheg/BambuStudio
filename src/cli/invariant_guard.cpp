@@ -252,4 +252,73 @@ bool check_auxiliary_passthrough(const std::string& pre_path,
     return true;
 }
 
+// ---- check_cover_references_resolve ----------------------------------------
+
+// extract_metadata is a by-construction substring matcher, NOT a general
+// XML parser. It assumes Bambu's exact output shape for <metadata> elements:
+// (a) attribute order is `name="KEY"` first; (b) the value follows immediately
+// after the closing `">` of the name attribute; (c) the closing tag is the
+// literal "</metadata>" on the same logical text run. Reordered attributes,
+// XML comments inside the element, or namespace prefixes would all defeat
+// this. Acceptable here because we only run it on archives that
+// store_bbs_3mf itself just produced (see src/libslic3r/Format/bbs_3mf.cpp).
+static std::string extract_metadata(const std::string& xml, const std::string& key) {
+    const std::string needle = "name=\"" + key + "\">";
+    const auto p = xml.find(needle);
+    if (p == std::string::npos) return "";
+    const auto start = p + needle.size();
+    const auto end   = xml.find("</metadata>", start);
+    if (end == std::string::npos) return "";
+    return xml.substr(start, end - start);
+}
+
+bool check_cover_references_resolve(const std::string& archive_path,
+                                    std::string* err_out) {
+    auto fail = [err_out](std::string msg) {
+        if (err_out) *err_out = std::move(msg);
+        return false;
+    };
+    if (err_out) err_out->clear();
+
+    mz_zip_archive zip{};
+    if (!zip_open(archive_path, zip))
+        return fail("cannot open archive: " + archive_path);
+    struct ScopedClose {
+        mz_zip_archive* z;
+        ~ScopedClose() { zip_close(*z); }
+    } close_zip{&zip};
+
+    const int idx_model = mz_zip_reader_locate_file(&zip, "3D/3dmodel.model", nullptr, 0);
+    if (idx_model < 0) return fail("missing 3D/3dmodel.model");
+
+    mz_zip_archive_file_stat st;
+    if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(idx_model), &st))
+        return fail("stat failed for 3D/3dmodel.model");
+    std::string model_xml(static_cast<size_t>(st.m_uncomp_size), '\0');
+    if (st.m_uncomp_size > 0 &&
+        !mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(idx_model),
+                                      &model_xml[0],
+                                      static_cast<size_t>(st.m_uncomp_size), 0))
+        return fail("read failed for 3D/3dmodel.model");
+
+    const std::string designer = extract_metadata(model_xml, "DesignerCover");
+    const std::string profile  = extract_metadata(model_xml, "ProfileCover");
+
+    auto check_one = [&](const std::string& meta_key,
+                         const std::string& subdir,
+                         const std::string& basename) -> bool {
+        if (basename.empty()) return true;
+        const std::string target = "Auxiliaries/" + subdir + "/" + basename;
+        const int idx = mz_zip_reader_locate_file(&zip, target.c_str(), nullptr, 0);
+        if (idx < 0)
+            return fail(meta_key + " references missing entry: " + basename
+                        + " (expected at " + target + ")");
+        return true;
+    };
+
+    if (!check_one("DesignerCover", "Model Pictures",   designer)) return false;
+    if (!check_one("ProfileCover",  "Profile Pictures", profile))  return false;
+    return true;
+}
+
 } // namespace bambu_cli

@@ -45,4 +45,12 @@ bool check_auxiliary_passthrough(const std::string& pre_path,
                                  const std::string& post_path,
                                  std::string* err_out);
 
+// Verify DesignerCover and ProfileCover metadata in <archive_path>'s
+// 3D/3dmodel.model reference filenames that exist in Auxiliaries/Model
+// Pictures/ and Auxiliaries/Profile Pictures/ respectively. Empty metadata
+// values are valid and pass. First mismatch is written to *err_out and
+// the function returns false.
+bool check_cover_references_resolve(const std::string& archive_path,
+                                    std::string* err_out);
+
 } // namespace bambu_cli
