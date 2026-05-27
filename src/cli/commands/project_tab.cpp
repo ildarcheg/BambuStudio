@@ -245,12 +245,13 @@ struct AuxRemoveArgs { std::string file, folder_str, name, output; };
 struct AuxExportArgs { std::string file, folder_str, name, to; };
 
 static AuxFolder parse_folder(const std::string& s, OutputMode mode) {
-    if (s == "pictures")       return AuxFolder::Pictures;
-    if (s == "bom")            return AuxFolder::Bom;
-    if (s == "assembly-guide") return AuxFolder::AssemblyGuide;
-    if (s == "others")         return AuxFolder::Others;
+    if (s == "model-pictures")    return AuxFolder::ModelPictures;
+    if (s == "profile-pictures")  return AuxFolder::ProfilePictures;
+    if (s == "bill-of-materials") return AuxFolder::BillOfMaterials;
+    if (s == "assembly-guide")    return AuxFolder::AssemblyGuide;
+    if (s == "others")            return AuxFolder::Others;
     emit_error(mode, "usage_error", "unknown folder: " + s +
-               " (expected: pictures|bom|assembly-guide|others)");
+               " (expected: model-pictures|profile-pictures|bill-of-materials|assembly-guide|others)");
     std::exit(to_int(ExitCode::usage_error));
 }
 

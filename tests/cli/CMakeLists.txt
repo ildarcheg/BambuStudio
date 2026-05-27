@@ -36,6 +36,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_project_aux_ops.cpp
     unit/test_png_placeholder.cpp
     unit/test_image_signature.cpp
+    unit/test_aux_folder_canonical_names.cpp
     # Roundtrip tests: in-process load -> mutate -> save -> reload cycles.
     # Ported from OrcaSlicer tests/cli/roundtrip/ as cross-project convergence
     # (2026-05-22).

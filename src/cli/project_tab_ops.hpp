@@ -84,10 +84,11 @@ std::string profile_clear(ProjectState& state, const std::vector<std::string>& f
 // ============================================================
 
 enum class AuxFolder {
-    Pictures,
-    Bom,
-    AssemblyGuide,
-    Others,
+    ModelPictures,      // archive subdir "Model Pictures"
+    ProfilePictures,    // archive subdir "Profile Pictures"
+    BillOfMaterials,    // archive subdir "Bill of Materials"
+    AssemblyGuide,      // archive subdir "Assembly Guide"
+    Others,             // archive subdir "Others"
 };
 
 // CLI flag spelling (hyphen form) for --folder.

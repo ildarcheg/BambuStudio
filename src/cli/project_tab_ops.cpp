@@ -206,30 +206,33 @@ std::string profile_clear(ProjectState& state, const std::vector<std::string>& f
 
 std::string folder_flag(AuxFolder f) {
     switch (f) {
-        case AuxFolder::Pictures:      return "pictures";
-        case AuxFolder::Bom:           return "bom";
-        case AuxFolder::AssemblyGuide: return "assembly-guide";
-        case AuxFolder::Others:        return "others";
+        case AuxFolder::ModelPictures:   return "model-pictures";
+        case AuxFolder::ProfilePictures: return "profile-pictures";
+        case AuxFolder::BillOfMaterials: return "bill-of-materials";
+        case AuxFolder::AssemblyGuide:   return "assembly-guide";
+        case AuxFolder::Others:          return "others";
     }
     return "others";
 }
 
 std::string folder_json_key(AuxFolder f) {
     switch (f) {
-        case AuxFolder::Pictures:      return "pictures";
-        case AuxFolder::Bom:           return "bom";
-        case AuxFolder::AssemblyGuide: return "assembly_guide";
-        case AuxFolder::Others:        return "others";
+        case AuxFolder::ModelPictures:   return "model_pictures";
+        case AuxFolder::ProfilePictures: return "profile_pictures";
+        case AuxFolder::BillOfMaterials: return "bill_of_materials";
+        case AuxFolder::AssemblyGuide:   return "assembly_guide";
+        case AuxFolder::Others:          return "others";
     }
     return "others";
 }
 
 std::string folder_subdir(AuxFolder f) {
     switch (f) {
-        case AuxFolder::Pictures:      return "Pictures";
-        case AuxFolder::Bom:           return "Bom";
-        case AuxFolder::AssemblyGuide: return "AssemblyGuide";
-        case AuxFolder::Others:        return "Others";
+        case AuxFolder::ModelPictures:   return "Model Pictures";
+        case AuxFolder::ProfilePictures: return "Profile Pictures";
+        case AuxFolder::BillOfMaterials: return "Bill of Materials";
+        case AuxFolder::AssemblyGuide:   return "Assembly Guide";
+        case AuxFolder::Others:          return "Others";
     }
     return "Others";
 }
@@ -243,8 +246,9 @@ std::vector<AuxEntry> aux_list(ProjectState& state) {
     const std::string aux_dir = state.model.get_auxiliary_file_temp_path();
     if (!fs::exists(aux_dir)) return entries;
 
-    for (const auto folder : {AuxFolder::Pictures, AuxFolder::Bom,
-                               AuxFolder::AssemblyGuide, AuxFolder::Others}) {
+    for (const auto folder : {AuxFolder::ModelPictures, AuxFolder::ProfilePictures,
+                               AuxFolder::BillOfMaterials, AuxFolder::AssemblyGuide,
+                               AuxFolder::Others}) {
         const std::string sub = aux_dir + "/" + folder_subdir(folder);
         if (!fs::exists(sub)) continue;
         for (const auto& entry : fs::directory_iterator(sub)) {

@@ -44,13 +44,13 @@ TEST_CASE("aux add: adds file to others folder", "[c3][aux_add]") {
     REQUIRE(r2.stdout_text.find("assembly_smoke.txt") != std::string::npos);
 }
 
-TEST_CASE("aux add: adds file to pictures folder", "[c3][aux_add]") {
+TEST_CASE("aux add: adds file to model-pictures folder", "[c3][aux_add]") {
     REQUIRE(fs::exists(kPng));
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
 
     auto r = spawn_cli({"project", "aux", "add", out,
-                        "--folder", "pictures", "--file", kPng});
+                        "--folder", "model-pictures", "--file", kPng});
     REQUIRE(r.exit_code == 0);
 
     auto r2 = spawn_cli({"--json", "project", "aux", "list", out});
@@ -63,7 +63,7 @@ TEST_CASE("aux add --name: override name in archive", "[c3][aux_add_name]") {
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
 
     auto r = spawn_cli({"project", "aux", "add", out,
-                        "--folder", "bom", "--file", kTxt, "--name", "my_bom.txt"});
+                        "--folder", "bill-of-materials", "--file", kTxt, "--name", "my_bom.txt"});
     REQUIRE(r.exit_code == 0);
 
     auto r2 = spawn_cli({"--json", "project", "aux", "list", out});

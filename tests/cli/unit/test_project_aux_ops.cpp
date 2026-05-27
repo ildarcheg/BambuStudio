@@ -71,15 +71,15 @@ TEST_CASE("sanitize_aux_name: valid names pass through unchanged",
 // ---- AuxFolder helpers -----------------------------------------------------
 
 TEST_CASE("folder_flag returns hyphen form", "[unit][c3][folder_helpers]") {
-    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::Pictures)      == "pictures");
-    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::Bom)           == "bom");
-    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::AssemblyGuide) == "assembly-guide");
-    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::Others)        == "others");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::ModelPictures)    == "model-pictures");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::BillOfMaterials)  == "bill-of-materials");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::AssemblyGuide)    == "assembly-guide");
+    REQUIRE(bambu_cli::folder_flag(bambu_cli::AuxFolder::Others)           == "others");
 }
 
 TEST_CASE("folder_json_key returns underscore form", "[unit][c3][folder_helpers]") {
     REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::AssemblyGuide) == "assembly_guide");
-    REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::Pictures)      == "pictures");
+    REQUIRE(bambu_cli::folder_json_key(bambu_cli::AuxFolder::ModelPictures) == "model_pictures");
 }
 
 // ---- aux_add / aux_list / aux_remove ---------------------------------------
@@ -189,4 +189,27 @@ TEST_CASE("aux_remove: unknown name -> std::out_of_range",
     REQUIRE_THROWS_AS(
         bambu_cli::aux_remove(s, bambu_cli::AuxFolder::Others, "no_such_file.txt"),
         std::out_of_range);
+}
+
+TEST_CASE("aux_list: file added under Profile Pictures is enumerated",
+          "[unit][c3][aux_list]") {
+    bambu_cli::ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    const std::string kPng = std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/../cover_smoke.png";
+    bambu_cli::AuxAddParams ap;
+    ap.folder    = bambu_cli::AuxFolder::ProfilePictures;
+    ap.file_path = kPng;
+    bambu_cli::aux_add(s, ap);
+
+    const auto entries = bambu_cli::aux_list(s);
+    bool saw = false;
+    for (const auto& e : entries) {
+        if (e.folder == bambu_cli::AuxFolder::ProfilePictures &&
+            e.name == "cover_smoke.png") {
+            saw = true;
+            break;
+        }
+    }
+    REQUIRE(saw);
 }

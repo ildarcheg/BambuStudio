@@ -102,16 +102,16 @@ TEST_CASE("bambu-cli: project aux add then remove leaves bucket empty after roun
     const std::string in = fresh_temp_path("_ptab_aux_rt.3mf");
     fs::copy_file(ref, in, fs::copy_options::overwrite_existing);
 
-    REQUIRE(spawn_cli({"project","aux","add",in,"--folder","pictures",
+    REQUIRE(spawn_cli({"project","aux","add",in,"--folder","model-pictures",
                        "--file",cube,"--name","x.png"}).exit_code == 0);
-    REQUIRE(spawn_cli({"project","aux","remove",in,"--folder","pictures",
+    REQUIRE(spawn_cli({"project","aux","remove",in,"--folder","model-pictures",
                        "--name","x.png"}).exit_code == 0);
 
     bambu_cli::ProjectState s;
     REQUIRE(bambu_cli::load_project(in, s).ok);
     auto entries = bambu_cli::aux_list(s);
     for (const auto& e : entries)
-        REQUIRE(!(e.folder == bambu_cli::AuxFolder::Pictures && e.name == "x.png"));
+        REQUIRE(!(e.folder == bambu_cli::AuxFolder::ModelPictures && e.name == "x.png"));
 
     fs::remove(in);
 }
