@@ -33,4 +33,16 @@ GuardResult run_guard(const std::string& saved_path, const ProjectState& state);
 GuardResult check_thumbnails_in_archive(const std::string& archive_path,
                                         const ProjectState& state);
 
+// Post-write check: every regular file under "Auxiliaries/" in <pre_path>
+// must be present at the same archive path in <post_path> with
+// byte-identical contents. First mismatch is written to *err_out and the
+// function returns false. Empty err_out on success.
+//
+// Pre = the source archive that was loaded; post = the tmp archive that
+// store_bbs_3mf just produced. Used to detect accidental aux folder
+// renames, missing files, or content corruption.
+bool check_auxiliary_passthrough(const std::string& pre_path,
+                                 const std::string& post_path,
+                                 std::string* err_out);
+
 } // namespace bambu_cli

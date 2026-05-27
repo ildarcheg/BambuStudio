@@ -201,4 +201,55 @@ GuardResult run_guard(const std::string& saved_path, const ProjectState& state) 
     return gr;
 }
 
+// ---- check_auxiliary_passthrough -------------------------------------------
+
+bool check_auxiliary_passthrough(const std::string& pre_path,
+                                 const std::string& post_path,
+                                 std::string* err_out) {
+    auto fail = [err_out](std::string msg) {
+        if (err_out) *err_out = std::move(msg);
+        return false;
+    };
+    if (err_out) err_out->clear();
+
+    mz_zip_archive pre{}, post{};
+    if (!zip_open(pre_path,  pre))  return fail("cannot open pre archive: "  + pre_path);
+    struct ScopedClose {
+        mz_zip_archive* z;
+        ~ScopedClose() { zip_close(*z); }
+    } close_pre{&pre};
+    if (!zip_open(post_path, post)) return fail("cannot open post archive: " + post_path);
+    ScopedClose close_post{&post};
+
+    auto read_bytes = [](mz_zip_archive& zip, mz_uint idx, std::string& out) -> bool {
+        mz_zip_archive_file_stat st;
+        if (!mz_zip_reader_file_stat(&zip, idx, &st)) return false;
+        out.resize(static_cast<size_t>(st.m_uncomp_size));
+        if (st.m_uncomp_size == 0) return true;
+        return mz_zip_reader_extract_to_mem(&zip, idx, &out[0],
+                                            static_cast<size_t>(st.m_uncomp_size), 0);
+    };
+
+    const mz_uint n_pre = mz_zip_reader_get_num_files(&pre);
+    for (mz_uint i = 0; i < n_pre; ++i) {
+        char name_buf[1024] = {};
+        mz_zip_reader_get_filename(&pre, i, name_buf, sizeof(name_buf));
+        std::string name = name_buf;
+        if (name.rfind("Auxiliaries/", 0) != 0) continue;
+        if (mz_zip_reader_is_file_a_directory(&pre, i)) continue;
+
+        const int idx_post = mz_zip_reader_locate_file(&post, name.c_str(), nullptr, 0);
+        if (idx_post < 0) return fail("missing in post: " + name);
+
+        std::string pre_bytes, post_bytes;
+        if (!read_bytes(pre,  i,                              pre_bytes))
+            return fail("read failed for pre: "  + name);
+        if (!read_bytes(post, static_cast<mz_uint>(idx_post), post_bytes))
+            return fail("read failed for post: " + name);
+        if (pre_bytes != post_bytes)
+            return fail("content drift: " + name);
+    }
+    return true;
+}
+
 } // namespace bambu_cli
