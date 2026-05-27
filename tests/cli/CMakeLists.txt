@@ -51,6 +51,7 @@ set(BAMBU_CLI_TEST_SOURCES
     roundtrip/test_split.cpp
     roundtrip/test_merge.cpp
     roundtrip/test_project_tab.cpp
+    roundtrip/test_reference_3mf_passthrough.cpp
 )
 
 # cli_tests links the bambu_cli_core static library (defined in src/cli/
@@ -65,6 +66,7 @@ target_include_directories(cli_tests PRIVATE
 target_compile_definitions(cli_tests PRIVATE
     BAMBU_CLI_EXE="$<TARGET_FILE:bambu-cli>"
     BAMBU_CLI_FIXTURE_3MF="${CMAKE_SOURCE_DIR}/tests/cli/fixtures/reference.3mf"
+    BAMBU_CLI_FIXTURE_TEST_REFERENCE_3MF="${CMAKE_SOURCE_DIR}/tests/cli/fixtures/test_reference.3mf"
     BAMBU_CLI_FIXTURE_STL_DIR="${CMAKE_SOURCE_DIR}/tests/cli/fixtures/stls"
     BAMBU_CLI_LOCAL_REFERENCE_3MF="${BAMBU_CLI_REFERENCE_3MF}"
     BAMBU_CLI_LOCAL_STL_DIR="${BAMBU_CLI_STL_DIR}"
