@@ -39,3 +39,6 @@ compile_commands.json
 .worktrees/
 **/dist/
 
+
+# CLI manual GUI smoke outputs (transient — produced by docs/cli/manual-test.md recipe)
+/smoke-out/

@@ -39,6 +39,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_aux_folder_canonical_names.cpp
     unit/test_cover_decoupling.cpp
     unit/test_cover_pick_by_name.cpp
+    unit/test_cover_real_images.cpp
     unit/test_invariant_aux_passthrough.cpp
     unit/test_invariant_cover_references.cpp
     # Roundtrip tests: in-process load -> mutate -> save -> reload cycles.
