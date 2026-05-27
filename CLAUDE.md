@@ -27,9 +27,15 @@ roundtrip). Link surface is deliberately narrowed via
   `metadata_items["ProfileTile"]` (upstream typo). See
   `docs/cli/notes/2026-05-21-bbs-profile-storage.md` for the format-level
   reason.
-- **Aux folder names:** Bambu uses `Pictures` / `Bom` / `AssemblyGuide` /
-  `Others` (TitleCase) reflecting the BBS `Auxiliaries/` dir naming; Orca
-  uses lowercase hyphenated. Do not "normalize."
+- **Aux folder names:** Bambu's canonical layout is `Model Pictures` /
+  `Profile Pictures` / `Bill of Materials` / `Assembly Guide` / `Others`
+  (TitleCase + spaces, per `src/slic3r/GUI/Auxiliary.hpp:75` and
+  `src/slic3r/GUI/Project.cpp:214-226`, verified against
+  `tests/cli/fixtures/test_reference.3mf`). The CLI emits exactly these
+  names. (Prior versions of this note incorrectly stated
+  `Pictures` / `Bom` / `AssemblyGuide` — that was a CLI bug, since
+  fixed; see `docs/cli/notes/2026-05-26-aux-folder-canonical-layout.md`.)
+  Orca uses lowercase-hyphenated; we explicitly do not match Orca here.
 - **CLI link surface:** `bambu_cli_core` requires
   `stubs_for_libslic3r.cpp` because Bambu's `libslic3r` itself references
   `LogSink` (verified 2026-05-22: removing stubs → `LNK1120`, 8
