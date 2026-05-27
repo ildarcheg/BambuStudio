@@ -1,5 +1,6 @@
 #include "project_tab.hpp"
 
+#include "../exceptions.hpp"
 #include "../exit_codes.hpp"
 #include "../io.hpp"
 #include "../json_output.hpp"
@@ -90,8 +91,9 @@ static std::vector<std::string> split_fields(const std::string& csv) {
 struct InfoShowArgs  { std::string file; };
 struct InfoSetArgs   {
     std::string file, output;
-    std::string title, description, license, copyright, cover;
-    bool has_title{}, has_desc{}, has_license{}, has_copyright{}, has_cover{};
+    std::string title, description, license, copyright, cover, cover_name;
+    bool has_title{}, has_desc{}, has_license{}, has_copyright{},
+         has_cover{}, has_cover_name{};
 };
 struct InfoClearArgs { std::string file, output, field; };
 
@@ -123,14 +125,24 @@ static void register_info(CLI::App* project, OutputMode* mode_out) {
        ->each([set_a](const std::string&){ set_a->has_license = true; });
     set->add_option("--copyright",   set_a->copyright,   "project copyright")
        ->each([set_a](const std::string&){ set_a->has_copyright = true; });
-    set->add_option("--cover",       set_a->cover,       "cover image (PNG only)")
+    set->add_option("--cover",       set_a->cover,
+                    "cover image to embed (PNG or JPEG)")
        ->each([set_a](const std::string&){ set_a->has_cover = true; });
+    set->add_option("--cover-name",  set_a->cover_name,
+                    "select existing image in Model Pictures as cover "
+                    "(mutually exclusive with --cover)")
+       ->each([set_a](const std::string&){ set_a->has_cover_name = true; });
 
     set->callback([set_a, mode_out]() {
         OutputMode mode = resolve_mode(mode_out);
         if (!set_a->has_title && !set_a->has_desc && !set_a->has_license &&
-            !set_a->has_copyright && !set_a->has_cover) {
+            !set_a->has_copyright && !set_a->has_cover && !set_a->has_cover_name) {
             emit_error(mode, "usage_error", "at least one field must be specified for info set");
+            std::exit(to_int(ExitCode::usage_error));
+        }
+        if (set_a->has_cover && set_a->has_cover_name) {
+            emit_error(mode, "usage_error",
+                       "--cover and --cover-name are mutually exclusive");
             std::exit(to_int(ExitCode::usage_error));
         }
         InfoSetParams p;
@@ -139,6 +151,15 @@ static void register_info(CLI::App* project, OutputMode* mode_out) {
         if (set_a->has_license)   p.license     = set_a->license;
         if (set_a->has_copyright) p.copyright   = set_a->copyright;
         if (set_a->has_cover)     p.cover_path  = set_a->cover;
+        if (set_a->has_cover_name) {
+            try {
+                p.cover_name = sanitize_aux_name(set_a->cover_name);
+            } catch (const AuxNameError& e) {
+                emit_error(mode, "usage_error",
+                           std::string("--cover-name: ") + e.what());
+                std::exit(to_int(ExitCode::usage_error));
+            }
+        }
 
         const std::string out = set_a->output.empty() ? set_a->file : set_a->output;
         run_mutation(mode, set_a->file, out, [&p](ProjectState& state) {
@@ -168,8 +189,8 @@ static void register_info(CLI::App* project, OutputMode* mode_out) {
 struct ProfileShowArgs  { std::string file; };
 struct ProfileSetArgs   {
     std::string file, output;
-    std::string title, description, cover;
-    bool has_title{}, has_desc{}, has_cover{};
+    std::string title, description, cover, cover_name;
+    bool has_title{}, has_desc{}, has_cover{}, has_cover_name{};
 };
 struct ProfileClearArgs { std::string file, output, field; };
 
@@ -197,19 +218,39 @@ static void register_profile(CLI::App* project, OutputMode* mode_out) {
        ->each([set_a](const std::string&){ set_a->has_title = true; });
     set->add_option("--description", set_a->description, "profile description")
        ->each([set_a](const std::string&){ set_a->has_desc = true; });
-    set->add_option("--cover",       set_a->cover,       "cover image (PNG only)")
+    set->add_option("--cover",       set_a->cover,
+                    "cover image to embed (PNG or JPEG)")
        ->each([set_a](const std::string&){ set_a->has_cover = true; });
+    set->add_option("--cover-name",  set_a->cover_name,
+                    "select existing image in Profile Pictures as cover "
+                    "(mutually exclusive with --cover)")
+       ->each([set_a](const std::string&){ set_a->has_cover_name = true; });
 
     set->callback([set_a, mode_out]() {
         OutputMode mode = resolve_mode(mode_out);
-        if (!set_a->has_title && !set_a->has_desc && !set_a->has_cover) {
+        if (!set_a->has_title && !set_a->has_desc &&
+            !set_a->has_cover && !set_a->has_cover_name) {
             emit_error(mode, "usage_error", "at least one field must be specified for profile set");
+            std::exit(to_int(ExitCode::usage_error));
+        }
+        if (set_a->has_cover && set_a->has_cover_name) {
+            emit_error(mode, "usage_error",
+                       "--cover and --cover-name are mutually exclusive");
             std::exit(to_int(ExitCode::usage_error));
         }
         ProfileSetParams p;
         if (set_a->has_title) p.title       = set_a->title;
         if (set_a->has_desc)  p.description = set_a->description;
         if (set_a->has_cover) p.cover_path  = set_a->cover;
+        if (set_a->has_cover_name) {
+            try {
+                p.cover_name = sanitize_aux_name(set_a->cover_name);
+            } catch (const AuxNameError& e) {
+                emit_error(mode, "usage_error",
+                           std::string("--cover-name: ") + e.what());
+                std::exit(to_int(ExitCode::usage_error));
+            }
+        }
 
         const std::string out = set_a->output.empty() ? set_a->file : set_a->output;
         run_mutation(mode, set_a->file, out, [&p](ProjectState& state) {

@@ -67,7 +67,8 @@ TEST_CASE("profile set --description: persists description", "[c2][profile_set_d
     REQUIRE(r2.stdout_text.find("ProfileDesc") != std::string::npos);
 }
 
-TEST_CASE("profile set --cover PNG: cover embedded in archive", "[c2][profile_set_cover]") {
+TEST_CASE("profile set --cover PNG: cover embedded in Profile Pictures",
+          "[c2][profile_set_cover]") {
     REQUIRE(fs::exists(kPng));
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
@@ -76,19 +77,28 @@ TEST_CASE("profile set --cover PNG: cover embedded in archive", "[c2][profile_se
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
-    auto bytes = read_zip_entry(out, "Auxiliaries/cover.png");
+    auto bytes = read_zip_entry(out, "Auxiliaries/Profile Pictures/cover_smoke.png");
     REQUIRE_FALSE(bytes.empty());
     REQUIRE(bytes.size() >= 8);
     REQUIRE(bytes[0] == 0x89);
     REQUIRE(bytes[1] == 0x50);
 }
 
-TEST_CASE("profile set --cover JPG: rejected exit 4", "[c2][profile_set_bad_cover]") {
+TEST_CASE("profile set --cover JPG: accepted, embedded in Profile Pictures",
+          "[c2][profile_set_cover]") {
     REQUIRE(fs::exists(kJpg));
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
     auto r = spawn_cli({"project", "profile", "set", out, "--cover", kJpg});
-    REQUIRE(r.exit_code == 4);
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 0);
+
+    auto bytes = read_zip_entry(out, "Auxiliaries/Profile Pictures/cover_smoke.jpg");
+    REQUIRE_FALSE(bytes.empty());
+    REQUIRE(bytes.size() >= 3);
+    REQUIRE(bytes[0] == 0xFF);
+    REQUIRE(bytes[1] == 0xD8);
+    REQUIRE(bytes[2] == 0xFF);
 }
 
 TEST_CASE("profile set: no fields -> exit 1", "[c2][profile_set_no_fields]") {
@@ -161,4 +171,35 @@ TEST_CASE("profile clear: idempotent on already-empty field", "[c2][profile_clea
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
     auto r = spawn_cli({"project", "profile", "clear", out, "--field", "description"});
     REQUIRE(r.exit_code == 0);
+}
+
+TEST_CASE("profile set: --cover and --cover-name together fails with exit 1",
+          "[c2][profile_set_cover_name]") {
+    const std::string src = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path(".3mf");
+
+    auto r = spawn_cli({
+        "project", "profile", "set",
+        src,
+        "--output", dst,
+        "--cover", kPng,
+        "--cover-name", "anything.png",
+    });
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("profile set: --cover-name with path separator fails with exit 1",
+          "[c2][profile_set_cover_name]") {
+    const std::string src = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path(".3mf");
+
+    auto r = spawn_cli({
+        "project", "profile", "set",
+        src,
+        "--output", dst,
+        "--cover-name", "subdir/cover.png",
+    });
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("--cover-name") != std::string::npos);
 }

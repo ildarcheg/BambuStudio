@@ -72,7 +72,7 @@ TEST_CASE("info set --description and --license: both persist", "[c1][info_set_m
     REQUIRE(r2.stdout_text.find("MIT")        != std::string::npos);
 }
 
-TEST_CASE("info set --cover PNG: cover is embedded in archive", "[c1][info_set_cover]") {
+TEST_CASE("info set --cover PNG: cover embedded in Model Pictures", "[c1][info_set_cover]") {
     REQUIRE(fs::exists(kPng));  // fixture must be committed
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
@@ -81,8 +81,8 @@ TEST_CASE("info set --cover PNG: cover is embedded in archive", "[c1][info_set_c
     INFO("stderr: " << r.stderr_text);
     REQUIRE(r.exit_code == 0);
 
-    // The PNG bytes should now be in the archive under Auxiliary/cover.png.
-    auto bytes = read_zip_entry(out, "Auxiliaries/cover.png");
+    // The PNG bytes should now be in the archive under Auxiliaries/Model Pictures/<basename>.
+    auto bytes = read_zip_entry(out, "Auxiliaries/Model Pictures/cover_smoke.png");
     REQUIRE_FALSE(bytes.empty());
     // Verify PNG signature.
     REQUIRE(bytes.size() >= 8);
@@ -92,7 +92,8 @@ TEST_CASE("info set --cover PNG: cover is embedded in archive", "[c1][info_set_c
     REQUIRE(bytes[3] == 0x47); // 'G'
 }
 
-TEST_CASE("info set --cover JPG: rejected with exit 4 (bad PNG)", "[c1][info_set_bad_cover]") {
+TEST_CASE("info set --cover JPG: accepted, embedded in Model Pictures",
+          "[c1][info_set_cover]") {
     REQUIRE(fs::exists(kJpg));  // fixture must be committed
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
@@ -100,8 +101,14 @@ TEST_CASE("info set --cover JPG: rejected with exit 4 (bad PNG)", "[c1][info_set
     auto r = spawn_cli({"project", "info", "set", out, "--cover", kJpg});
     INFO("stdout: " << r.stdout_text);
     INFO("stderr: " << r.stderr_text);
-    REQUIRE(r.exit_code == 4);
-    REQUIRE(r.stderr_text.find("bad_config") != std::string::npos);
+    REQUIRE(r.exit_code == 0);
+
+    auto bytes = read_zip_entry(out, "Auxiliaries/Model Pictures/cover_smoke.jpg");
+    REQUIRE_FALSE(bytes.empty());
+    REQUIRE(bytes.size() >= 3);
+    REQUIRE(bytes[0] == 0xFF);
+    REQUIRE(bytes[1] == 0xD8);
+    REQUIRE(bytes[2] == 0xFF);
 }
 
 TEST_CASE("info set: no fields -> exit 1 (usage error)", "[c1][info_set_no_fields]") {
@@ -176,4 +183,37 @@ TEST_CASE("info clear: idempotent on already-empty field", "[c1][info_clear_idem
     // Clear a field that's already empty - should succeed (exit 0).
     auto r = spawn_cli({"project", "info", "clear", out, "--field", "license"});
     REQUIRE(r.exit_code == 0);
+}
+
+TEST_CASE("info set: --cover and --cover-name together fails with exit 1",
+          "[c1][info_set_cover_name]") {
+    const std::string src = canonical_committed_3mf();
+    REQUIRE_FALSE(src.empty());
+    const std::string dst = fresh_temp_path(".3mf");
+    REQUIRE(read_zip_entry(src, "3D/3dmodel.model").size() > 0);  // sanity
+
+    auto r = spawn_cli({
+        "project", "info", "set",
+        src,
+        "--output", dst,
+        "--cover", kPng,
+        "--cover-name", "anything.png",
+    });
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("mutually exclusive") != std::string::npos);
+}
+
+TEST_CASE("info set: --cover-name with path separator fails with exit 1",
+          "[c1][info_set_cover_name]") {
+    const std::string src = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path(".3mf");
+
+    auto r = spawn_cli({
+        "project", "info", "set",
+        src,
+        "--output", dst,
+        "--cover-name", "subdir/cover.png",
+    });
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("--cover-name") != std::string::npos);
 }
