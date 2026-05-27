@@ -82,10 +82,11 @@ TEST_CASE("bambu-cli: project info set --cover survives save/load (pointer + byt
     bambu_cli::ProjectState s;
     REQUIRE(bambu_cli::load_project(in, s).ok);
     REQUIRE(s.model.model_info != nullptr);
-    // Bambu cover-path divergence: "Auxiliaries/cover.png" (vs Orca's
-    // "Auxiliaries/.thumbnails/thumbnail_3mf.png").
-    REQUIRE(s.model.model_info->cover_file == "Auxiliaries/cover.png");
-    const fs::path landed = fs::path(s.model.get_auxiliary_file_temp_path()) / "cover.png";
+    // DesignerCover metadata carries the basename only; the image lives at
+    // Auxiliaries/Model Pictures/<basename> in the archive (Bambu's
+    // canonical layout — see docs/cli/notes/2026-05-26-aux-folder-canonical-layout.md).
+    REQUIRE(s.model.model_info->cover_file == "cover_smoke.png");
+    const fs::path landed = fs::path(s.model.get_auxiliary_file_temp_path()) / "Model Pictures" / "cover_smoke.png";
     REQUIRE(fs::exists(landed));
     REQUIRE(read_all(landed) == src_bytes);
 

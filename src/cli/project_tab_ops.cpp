@@ -21,16 +21,6 @@ namespace bambu_cli {
 // Internal helpers
 // ============================================================
 
-static const uint8_t kPngSignature[8] = {0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A};
-
-static bool check_png_signature(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    uint8_t sig[8] = {};
-    f.read(reinterpret_cast<char*>(sig), 8);
-    return f.gcount() == 8 && std::memcmp(sig, kPngSignature, 8) == 0;
-}
-
 namespace detail {
 
 bool is_png_or_jpeg(const std::string& path) {
@@ -60,41 +50,41 @@ static Slic3r::ModelProfileInfo& ensure_profile_info(Slic3r::Model& model) {
     return *model.profile_info;
 }
 
-// Embed a cover PNG from on-disk path into the model's aux temp dir.
-// Sets the archive-relative path on success. Throws BadCoverImage on failure.
-static void embed_cover(Slic3r::Model& model,
-                        const std::string& on_disk_path,
-                        std::string& field_out,
-                        const std::string& archive_entry /* e.g. "Auxiliaries/cover.png" */) {
+namespace detail {
+
+std::string embed_image_into_folder(Slic3r::Model& model,
+                                    AuxFolder folder,
+                                    const std::string& on_disk_path) {
+    if (folder != AuxFolder::ModelPictures &&
+        folder != AuxFolder::ProfilePictures)
+        throw std::invalid_argument(
+            "embed_image_into_folder: folder must be ModelPictures or ProfilePictures");
     if (!fs::exists(on_disk_path))
         throw BadCoverImage("cover file unreadable: " + on_disk_path);
-    if (!check_png_signature(on_disk_path))
-        throw BadCoverImage("cover must be PNG (signature mismatch): " + on_disk_path);
+    if (!is_png_or_jpeg(on_disk_path))
+        throw BadCoverImage(
+            "cover must be PNG or JPEG (signature mismatch): " + on_disk_path);
+
     const std::string aux_dir = model.get_auxiliary_file_temp_path();
-    const std::string model_pics_dir = aux_dir + "/Model Pictures";
-    fs::create_directories(model_pics_dir);
-    const std::string dest = model_pics_dir + "/cover.png";
+    const std::string folder_dir = aux_dir + "/" + folder_subdir(folder);
+    fs::create_directories(folder_dir);
+
+    const std::string basename = fs::path(on_disk_path).filename().string();
+    const std::string dest     = folder_dir + "/" + basename;
     fs::copy_file(on_disk_path, dest, fs::copy_options::overwrite_existing);
-    field_out = archive_entry;
+    return basename;
 }
 
-// Cover-image refcount (ported from OrcaSlicer project_tab_ops.hpp:223 /
-// project_tab_ops.cpp::clear_cover_image). The on-disk cover.png is shared
-// by `info.cover_file` and `profile.ProfileCover`; deleting it eagerly on
-// the first clear would orphan the other surface's pointer. Defer the
-// delete until both pointers are empty after the clear.
-static bool info_cover_empty(const Slic3r::Model& model) {
-    return !model.model_info || model.model_info->cover_file.empty();
+void require_image_in_folder(Slic3r::Model& model,
+                             AuxFolder folder,
+                             const std::string& basename) {
+    const std::string aux_dir = model.get_auxiliary_file_temp_path();
+    const std::string target  = aux_dir + "/" + folder_subdir(folder) + "/" + basename;
+    if (!fs::exists(target))
+        throw std::out_of_range("aux entry not found: " + basename);
 }
-static bool profile_cover_empty(const Slic3r::Model& model) {
-    return !model.profile_info || model.profile_info->ProfileCover.empty();
-}
-static void delete_cover_file_if_unreferenced(Slic3r::Model& model) {
-    if (!info_cover_empty(model) || !profile_cover_empty(model)) return;
-    const fs::path landed = fs::path(model.get_auxiliary_file_temp_path()) / "Model Pictures" / "cover.png";
-    boost::system::error_code ec;
-    fs::remove(landed, ec);  // best-effort; absent file is a no-op
-}
+
+} // namespace detail
 
 static void validate_fields(const std::vector<std::string>& fields,
                              const std::set<std::string>& allowed) {
@@ -132,8 +122,17 @@ std::string info_set(ProjectState& state, const InfoSetParams& p) {
     if (p.description) mi.description = *p.description;
     if (p.license)     mi.license     = *p.license;
     if (p.copyright)   mi.copyright   = *p.copyright;
-    if (p.cover_path)
-        embed_cover(state.model, *p.cover_path, mi.cover_file, "cover.png");
+    // Mutual exclusion + name sanitization are enforced by the CLI layer
+    // (commands/project_tab.cpp). If both are set, cover_path wins.
+    if (p.cover_path) {
+        mi.cover_file = detail::embed_image_into_folder(
+            state.model, AuxFolder::ModelPictures, *p.cover_path);
+    } else if (p.cover_name) {
+        detail::require_image_in_folder(state.model,
+                                        AuxFolder::ModelPictures,
+                                        *p.cover_name);
+        mi.cover_file = *p.cover_name;
+    }
     return "applied info edits";
 }
 
@@ -141,15 +140,13 @@ std::string info_clear(ProjectState& state, const std::vector<std::string>& fiel
     validate_fields(fields, allowed_info_fields());
     auto& mi = ensure_model_info(state.model);
     int n = 0;
-    bool cleared_cover = false;
     for (const auto& f : fields) {
-        if (f == "title")       { mi.model_name  = ""; ++n; }
+        if (f == "title")            { mi.model_name  = ""; ++n; }
         else if (f == "description") { mi.description = ""; ++n; }
         else if (f == "license")     { mi.license     = ""; ++n; }
         else if (f == "copyright")   { mi.copyright   = ""; ++n; }
-        else if (f == "cover")       { mi.cover_file  = ""; ++n; cleared_cover = true; }
+        else if (f == "cover")       { mi.cover_file  = ""; ++n; }
     }
-    if (cleared_cover) delete_cover_file_if_unreferenced(state.model);
     return "cleared " + std::to_string(n) + " field(s)";
 }
 
@@ -181,8 +178,16 @@ std::string profile_set(ProjectState& state, const ProfileSetParams& p) {
     auto& pi = ensure_profile_info(state.model);
     if (p.title)       pi.ProfileTile        = *p.title;
     if (p.description) pi.ProfileDescription = *p.description;
-    if (p.cover_path)
-        embed_cover(state.model, *p.cover_path, pi.ProfileCover, "cover.png");
+    // Mutual exclusion + name sanitization are enforced by the CLI layer.
+    if (p.cover_path) {
+        pi.ProfileCover = detail::embed_image_into_folder(
+            state.model, AuxFolder::ProfilePictures, *p.cover_path);
+    } else if (p.cover_name) {
+        detail::require_image_in_folder(state.model,
+                                        AuxFolder::ProfilePictures,
+                                        *p.cover_name);
+        pi.ProfileCover = *p.cover_name;
+    }
     return "applied profile edits";
 }
 
@@ -190,13 +195,11 @@ std::string profile_clear(ProjectState& state, const std::vector<std::string>& f
     validate_fields(fields, allowed_profile_fields());
     auto& pi = ensure_profile_info(state.model);
     int n = 0;
-    bool cleared_cover = false;
     for (const auto& f : fields) {
-        if (f == "title")       { pi.ProfileTile        = ""; ++n; }
+        if (f == "title")            { pi.ProfileTile        = ""; ++n; }
         else if (f == "description") { pi.ProfileDescription = ""; ++n; }
-        else if (f == "cover")       { pi.ProfileCover       = ""; ++n; cleared_cover = true; }
+        else if (f == "cover")       { pi.ProfileCover       = ""; ++n; }
     }
-    if (cleared_cover) delete_cover_file_if_unreferenced(state.model);
     return "cleared " + std::to_string(n) + " field(s)";
 }
 

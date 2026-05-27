@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+namespace Slic3r { class Model; }
+
 namespace bambu_cli {
 
 // ============================================================
@@ -28,7 +30,8 @@ struct InfoSetParams {
     std::optional<std::string> description;
     std::optional<std::string> license;
     std::optional<std::string> copyright;
-    std::optional<std::string> cover_path;  // on-disk path; validated as PNG
+    std::optional<std::string> cover_path;  // on-disk path; validated PNG/JPEG
+    std::optional<std::string> cover_name;  // basename of an existing aux entry in Model Pictures
 };
 
 // Field names accepted by info_clear.
@@ -61,7 +64,8 @@ struct ProfileView {
 struct ProfileSetParams {
     std::optional<std::string> title;
     std::optional<std::string> description;
-    std::optional<std::string> cover_path;  // on-disk path; validated as PNG
+    std::optional<std::string> cover_path;  // on-disk path; validated PNG/JPEG
+    std::optional<std::string> cover_name;  // basename of an existing aux entry in Profile Pictures
 };
 
 // Field names accepted by profile_clear.
@@ -139,6 +143,24 @@ namespace detail {
     // or the JPEG SOI sequence (FF D8 FF). Returns false on read failure,
     // truncation (<3 bytes), or any other signature.
     bool is_png_or_jpeg(const std::string& path);
+
+    // Embed <on_disk_path> as <basename(on_disk_path)> under the aux temp
+    // <folder>. Validates PNG/JPEG signature. Returns the basename written.
+    // Throws BadCoverImage on bad signature / unreadable source.
+    // <folder> must be ModelPictures or ProfilePictures (anything else throws
+    // std::invalid_argument as an internal sanity check; CLI parsing never
+    // produces those values for the cover paths).
+    std::string embed_image_into_folder(Slic3r::Model& model,
+                                        AuxFolder folder,
+                                        const std::string& on_disk_path);
+
+    // Throws std::out_of_range if Auxiliaries/<folder>/<basename> is not
+    // present in the aux temp dir. Maps to ExitCode::unknown_reference (6)
+    // via run_mutation. Takes Model& (not const&) because
+    // get_auxiliary_file_temp_path is non-const in libslic3r.
+    void require_image_in_folder(Slic3r::Model& model,
+                                 AuxFolder folder,
+                                 const std::string& basename);
 }
 
 } // namespace bambu_cli

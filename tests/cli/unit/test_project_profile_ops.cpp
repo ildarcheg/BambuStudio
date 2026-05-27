@@ -58,7 +58,7 @@ TEST_CASE("profile_set: sets description",
     REQUIRE(s.model.profile_info->ProfileDescription == "Profile Desc");
 }
 
-TEST_CASE("profile_set --cover valid PNG: sets ProfileCover path",
+TEST_CASE("profile_set --cover valid PNG: sets ProfileCover to basename",
           "[unit][c2][profile_set_cover]") {
     REQUIRE(fs::exists(kPng));
     ProjectState s;
@@ -66,17 +66,18 @@ TEST_CASE("profile_set --cover valid PNG: sets ProfileCover path",
     bambu_cli::ProfileSetParams p;
     p.cover_path = kPng;
     REQUIRE_NOTHROW(bambu_cli::profile_set(s, p));
-    REQUIRE(s.model.profile_info->ProfileCover == "Auxiliaries/cover.png");
+    REQUIRE(s.model.profile_info->ProfileCover == "cover_smoke.png");
 }
 
-TEST_CASE("profile_set --cover JPG: throws BadCoverImage",
-          "[unit][c2][profile_set_bad_cover]") {
+TEST_CASE("profile_set --cover JPG: accepted (PNG + JPEG both valid)",
+          "[unit][c2][profile_set_cover]") {
     REQUIRE(fs::exists(kJpg));
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     bambu_cli::ProfileSetParams p;
     p.cover_path = kJpg;
-    REQUIRE_THROWS_AS(bambu_cli::profile_set(s, p), bambu_cli::BadCoverImage);
+    REQUIRE_NOTHROW(bambu_cli::profile_set(s, p));
+    REQUIRE(s.model.profile_info->ProfileCover == "cover_smoke.jpg");
 }
 
 TEST_CASE("profile_set: user_id and user_name are preserved (read-only)",
