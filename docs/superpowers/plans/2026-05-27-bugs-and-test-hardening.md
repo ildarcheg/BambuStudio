@@ -282,7 +282,24 @@ git commit -m "test(cli): non-ASCII metadata regression guard + argv red pin"
 
 ---
 
-### Task 2: Apply argv-to-UTF-8 conversion at the CLI boundary (wmain on Windows)
+### Task 2: DESCOPED (2026-05-28)
+
+> Both Task 1 tests landed green: the programmatic API path and the
+> `boost::process`-driven subprocess path both round-trip non-ASCII
+> metadata correctly. The Phase G failure was specifically PowerShell
+> with non-UTF-8 active code page handing narrow-main argv. `spawn_cli`
+> uses `CreateProcessW`, which bypasses that conversion, so no
+> automated test we can write inside this repo reproduces the bug. A
+> `wmain` fix would have no red→green test to validate it, and the
+> existing workaround (ASCII-only metadata, or users opting into
+> UTF-8 ACP via "Beta: Use Unicode UTF-8 for worldwide language
+> support") is acceptable. Per YAGNI, Task 2 is descoped. Phase A
+> exit: 4 green regression guards covering the real round-trip paths.
+>
+> Original Task 2 body retained below for reference. It is NOT to be
+> executed.
+
+#### (descoped) — Apply argv-to-UTF-8 conversion at the CLI boundary (wmain on Windows)
 
 **Files:**
 - Create: `docs/cli/notes/2026-05-27-non-ascii-metadata-bug.md`
