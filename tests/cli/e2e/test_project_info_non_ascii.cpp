@@ -6,14 +6,15 @@
 using namespace bambu_cli_test;
 namespace fs = boost::filesystem;
 
-// On Windows, narrow-main argv arrives in the active code page (typically
-// windows-1252), not UTF-8. PowerShell passes "—" (em-dash) as the single
-// byte 0x97 in ACP. bambu-cli stores it as-is in description; on save the
-// archive's metadata XML contains 0x97, which expat correctly rejects on
-// reload as not well-formed UTF-8 (invalid token at line 7).
-//
-// This test fails until the wmain fix lands in Task 2: convert UTF-16
-// argv to UTF-8 once at the CLI entry point.
+// Green regression guard for non-ASCII metadata going through the CLI
+// subprocess path. On Windows, narrow-main argv arrives in the active
+// code page (typically windows-1252) — an em-dash typed directly in
+// PowerShell becomes the single byte 0x97 and trips expat on reload as
+// invalid UTF-8 (the Phase G symptom). This test does NOT reproduce that
+// specific failure mode because boost::process routes through
+// CreateProcessW after UTF-8→UTF-16 conversion, bypassing the ACP path.
+// See commit cddaaa4b4 ("descope Phase A Task 2") for why the underlying
+// argv bug isn't reproducible inside this repo's automated test infra.
 TEST_CASE("info set --description with em-dash (non-ASCII): persists correctly",
           "[e2e][info_set_non_ascii]") {
     const std::string out = fresh_temp_path(".3mf");
