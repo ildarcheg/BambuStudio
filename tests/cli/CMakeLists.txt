@@ -20,6 +20,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_config.cpp
     e2e/test_json_and_exit_codes.cpp
     e2e/test_project_info.cpp
+    e2e/test_project_info_non_ascii.cpp
     e2e/test_project_profile.cpp
     e2e/test_project_aux.cpp
     e2e/test_thumbnail_passthrough.cpp
@@ -53,6 +54,7 @@ set(BAMBU_CLI_TEST_SOURCES
     roundtrip/test_merge.cpp
     roundtrip/test_project_tab.cpp
     roundtrip/test_reference_3mf_passthrough.cpp
+    roundtrip/test_non_ascii_metadata.cpp
 )
 
 # cli_tests links the bambu_cli_core static library (defined in src/cli/
