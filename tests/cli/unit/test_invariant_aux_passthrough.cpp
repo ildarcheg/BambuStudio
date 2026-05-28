@@ -1,5 +1,6 @@
 #include <catch2/catch.hpp>
 #include "invariant_guard.hpp"
+#include "unit_helpers.hpp"
 
 #include <boost/filesystem.hpp>
 #include <miniz.h>
@@ -124,5 +125,53 @@ TEST_CASE("aux passthrough: nested subdirs in temp dir map to nested archive pat
                                 {"Auxiliaries/Model Pictures/sub/nested.jpg", "NEST"}});
     std::string err;
     REQUIRE(bambu_cli::check_auxiliary_passthrough(dir, post, &err));
+    fs::remove_all(dir); fs::remove(post);
+}
+
+TEST_CASE("aux passthrough: extra entry added externally is tolerated",
+          "[unit][invariant_aux]") {
+    // check_auxiliary_passthrough only verifies temp-dir contents survived
+    // into the archive, not the converse. Extras (e.g. .thumbnails/) are
+    // legitimately written by other code paths. This case pins that
+    // behavior: adding an extra aux file *to the archive* externally is
+    // NOT a passthrough failure.
+    const auto dir  = make_dir({{"Others/k.txt", "K"}});
+    const auto post = make_zip({{"3D/3dmodel.model", "X"},
+                                {"Auxiliaries/Others/k.txt", "K"}});
+    bambu_cli_unit::mutate_archive_add_extra(
+        post, "Auxiliaries/Others/extra.txt", "EXTRA");
+
+    std::string err;
+    REQUIRE(bambu_cli::check_auxiliary_passthrough(dir, post, &err));
+    REQUIRE(err.empty());
+    fs::remove_all(dir); fs::remove(post);
+}
+
+TEST_CASE("aux passthrough: known-good archive minus a temp-dir file fails",
+          "[unit][invariant_aux]") {
+    const auto dir  = make_dir({{"Bill of Materials/parts.csv", "id,name"},
+                                {"Others/note.txt", "hi"}});
+    const auto post = make_zip({
+        {"3D/3dmodel.model", "X"},
+        {"Auxiliaries/Bill of Materials/parts.csv", "id,name"},
+        {"Auxiliaries/Others/note.txt", "hi"},
+    });
+    bambu_cli_unit::mutate_archive_remove_entry(
+        post, "Auxiliaries/Bill of Materials/parts.csv");
+
+    std::string err;
+    REQUIRE_FALSE(bambu_cli::check_auxiliary_passthrough(dir, post, &err));
+    REQUIRE(err.find("Bill of Materials/parts.csv") != std::string::npos);
+    fs::remove_all(dir); fs::remove(post);
+}
+
+TEST_CASE("aux passthrough: archive with no aux entries but temp dir non-empty fails",
+          "[unit][invariant_aux]") {
+    const auto dir  = make_dir({{"Assembly Guide/print.pdf", "PDFBYTES"}});
+    const auto post = make_zip({{"3D/3dmodel.model", "X"}});
+
+    std::string err;
+    REQUIRE_FALSE(bambu_cli::check_auxiliary_passthrough(dir, post, &err));
+    REQUIRE(err.find("Assembly Guide/print.pdf") != std::string::npos);
     fs::remove_all(dir); fs::remove(post);
 }
