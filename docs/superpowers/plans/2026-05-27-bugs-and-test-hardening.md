@@ -465,9 +465,25 @@ Adjust the commit message subject to match the actual fix branch:
 
 ---
 
-## Phase B — Thumbnail passthrough after plate compaction (#2)
+## Phase B — DESCOPED (2026-05-28)
 
-### Task 3: Repro test for thumbnail passthrough after middle-plate removal
+> Task 3's repro test cannot be written: `test_reference.3mf` has only
+> 1 plate, and `save_project` writes gray placeholder thumbnails for
+> every plate regardless of source, so synthesized thumbnails are
+> byte-identical and don't differentiate "passthrough succeeded" from
+> "fell back to synthesis". A meaningful test requires distinct
+> per-plate thumbnails in the source fixture, which would mean either
+> a manual GUI step to bake a real multi-plate fixture or ~80 lines of
+> archive-mutation test setup. Since the underlying bug is hypothetical
+> (CLAUDE.md's "may fall back to synthesis" was never confirmed) and
+> the fixture investment is high relative to that uncertainty, Phase B
+> is descoped per YAGNI. The CLAUDE.md "Open items" entry remains as
+> documentation.
+>
+> Original Phase B body retained below for reference. It is NOT to be
+> executed.
+
+### (descoped) — Task 3: Repro test for thumbnail passthrough after middle-plate removal
 
 **Files:**
 - Create: `tests/cli/roundtrip/test_thumbnail_compaction.cpp`
