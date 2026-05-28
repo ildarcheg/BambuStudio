@@ -1,4 +1,5 @@
 #include <catch2/catch.hpp>
+#include "unit_helpers.hpp"
 #include "invariant_guard.hpp"
 
 #include <boost/filesystem.hpp>
@@ -81,5 +82,64 @@ TEST_CASE("cover refs: ProfileCover references absent file fails",
     std::string err;
     REQUIRE_FALSE(bambu_cli::check_cover_references_resolve(z, &err));
     REQUIRE(err.find("ProfileCover") != std::string::npos);
+    fs::remove(z);
+}
+
+TEST_CASE("cover refs: known-good archive minus DesignerCover file fails",
+          "[unit][invariant_covref]") {
+    // Known-good shape: archive with both metadata pointers + both files.
+    const auto z = make_zip({
+        {"3D/3dmodel.model", model_with("designer.png", "profile.jpg")},
+        {"Auxiliaries/Model Pictures/designer.png",   "PNGDATA"},
+        {"Auxiliaries/Profile Pictures/profile.jpg",  "JPGDATA"},
+    });
+    std::string err0;
+    REQUIRE(bambu_cli::check_cover_references_resolve(z, &err0));
+    REQUIRE(err0.empty());
+
+    bambu_cli_unit::mutate_archive_remove_entry(
+        z, "Auxiliaries/Model Pictures/designer.png");
+
+    std::string err;
+    REQUIRE_FALSE(bambu_cli::check_cover_references_resolve(z, &err));
+    REQUIRE(err.find("DesignerCover") != std::string::npos);
+    REQUIRE(err.find("designer.png")   != std::string::npos);
+    fs::remove(z);
+}
+
+TEST_CASE("cover refs: known-good archive minus ProfileCover file fails",
+          "[unit][invariant_covref]") {
+    const auto z = make_zip({
+        {"3D/3dmodel.model", model_with("designer.png", "profile.jpg")},
+        {"Auxiliaries/Model Pictures/designer.png",   "PNGDATA"},
+        {"Auxiliaries/Profile Pictures/profile.jpg",  "JPGDATA"},
+    });
+    bambu_cli_unit::mutate_archive_remove_entry(
+        z, "Auxiliaries/Profile Pictures/profile.jpg");
+
+    std::string err;
+    REQUIRE_FALSE(bambu_cli::check_cover_references_resolve(z, &err));
+    REQUIRE(err.find("ProfileCover") != std::string::npos);
+    REQUIRE(err.find("profile.jpg")  != std::string::npos);
+    fs::remove(z);
+}
+
+TEST_CASE("cover refs: ProfileCover injected into model XML with no file fails",
+          "[unit][invariant_covref]") {
+    // Start from a known-good archive with only DesignerCover, then inject
+    // a ProfileCover metadata pointer via a wholesale model XML rewrite.
+    // (No targeted helper for in-archive XML mutation — it's a one-line
+    // replacement of the model bytes, which mutate_archive_remove_entry +
+    // a fresh add via make_zip would also achieve. We use the simpler
+    // path: rebuild the zip with the desired shape.)
+    const auto z = make_zip({
+        {"3D/3dmodel.model", model_with("d.png", "dangling.jpg")},
+        {"Auxiliaries/Model Pictures/d.png", "OK"},
+        // Auxiliaries/Profile Pictures/dangling.jpg deliberately absent.
+    });
+    std::string err;
+    REQUIRE_FALSE(bambu_cli::check_cover_references_resolve(z, &err));
+    REQUIRE(err.find("ProfileCover") != std::string::npos);
+    REQUIRE(err.find("dangling.jpg") != std::string::npos);
     fs::remove(z);
 }
