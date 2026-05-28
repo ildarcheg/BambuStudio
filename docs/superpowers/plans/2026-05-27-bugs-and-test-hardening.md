@@ -50,7 +50,21 @@ src/cli/io.cpp                                                (modify — Phase 
 
 ## Phase A — Non-ASCII metadata XML escaping (#1)
 
-### Task 1: Red test pinning the non-ASCII roundtrip bug
+> **Amendment 2026-05-27:** Initial Task 1 dispatch showed the programmatic
+> round-trip (`description` set directly on `ModelObject`, save, reload)
+> passes cleanly. `xml_escape` correctly preserves non-ASCII UTF-8 bytes;
+> the writer emits them faithfully; the reader accepts them. The actual
+> Phase G bug is in the **CLI argv path on Windows**: PowerShell passes
+> arguments in the active code page (windows-1252), the em-dash arrives
+> as a single byte `0x97`, gets stored as-is, and expat correctly rejects
+> the resulting non-UTF-8 byte on reload.
+>
+> Task 1 is reshaped: keep the now-green programmatic test as a regression
+> guard (commit as green), then add a SUBPROCESS e2e test that pins the
+> argv-driven bug (the new red). Task 2 narrows to Branch B (wmain on
+> Windows) as the fix.
+
+### Task 1: Programmatic regression guard (green) + argv subprocess pin (red)
 
 **Files:**
 - Create: `tests/cli/roundtrip/test_non_ascii_metadata.cpp`
@@ -161,82 +175,226 @@ cmake --build build --target cli_tests --config Release --parallel 2
 ```
 Expected: builds clean. If the build fails on a Catch2 include, re-check that the file path matches a registered source entry.
 
-- [ ] **Step 4: Run the new test, expect failure**
+- [ ] **Step 4: Run the test, expect PASS (this is now a green regression guard)**
 
 ```powershell
 build\tests\cli\Release\cli_tests.exe "[non_ascii_metadata]"
 ```
-Expected: FAIL. Likely failure modes:
-- `save_project` returns `!ok` with `error_code: "invariant_violation"` and `error_message` mentioning `config_roundtrip` and a parser error at line 7.
-- Or save succeeds but reload returns mismatched description (silent truncation/replacement).
+Expected: PASS for both cases. The programmatic UTF-8 round-trip is correct; this test exists to catch future regressions in `xml_escape`, the writer, or the reader.
 
-If the test passes on the first run, **STOP** and report — the bug may already be fixed upstream and this work needs re-scoping.
+If this test fails, STOP — that indicates a different bug than the one Phase A targets, and the plan needs further reshaping.
 
-- [ ] **Step 5: Commit (red)**
+- [ ] **Step 5: Create the e2e subprocess red test pinning the argv bug**
+
+`tests/cli/e2e/test_project_info_non_ascii.cpp`:
+```cpp
+#include "test_helpers.hpp"
+
+#include <catch2/catch.hpp>
+#include <boost/filesystem.hpp>
+
+using namespace bambu_cli_test;
+namespace fs = boost::filesystem;
+
+// On Windows, narrow-main argv arrives in the active code page (typically
+// windows-1252), not UTF-8. PowerShell passes "—" (em-dash) as the single
+// byte 0x97 in ACP. bambu-cli stores it as-is in description; on save the
+// archive's metadata XML contains 0x97, which expat correctly rejects on
+// reload as not well-formed UTF-8 (invalid token at line 7).
+//
+// This test fails until the wmain fix lands (Branch B in Task 2): convert
+// UTF-16 argv to UTF-8 once at the CLI entry point.
+TEST_CASE("info set --description with em-dash (non-ASCII): persists correctly",
+          "[e2e][info_set_non_ascii]") {
+    const std::string out = fresh_temp_path(".3mf");
+    fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
+
+    // UTF-8 em-dash (U+2014). boost::process on Windows routes through
+    // CreateProcessW after ACP conversion, mirroring real-world PowerShell
+    // invocations.
+    const std::string em_dash_desc = "Resin print \xE2\x80\x94 test";
+
+    auto r = spawn_cli({"project", "info", "set", out,
+                        "--description", em_dash_desc});
+    INFO("stderr: " << r.stderr_text);
+    INFO("stdout: " << r.stdout_text);
+    REQUIRE(r.exit_code == 0);
+
+    auto r2 = spawn_cli({"--json", "project", "info", "show", out});
+    INFO("show stdout: " << r2.stdout_text);
+    REQUIRE(r2.exit_code == 0);
+    REQUIRE(r2.stdout_text.find("\xE2\x80\x94") != std::string::npos);
+}
+
+TEST_CASE("info set --title with CJK characters: persists correctly",
+          "[e2e][info_set_non_ascii]") {
+    const std::string out = fresh_temp_path(".3mf");
+    fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
+
+    const std::string cjk_title = "\xE6\xB5\x8B\xE8\xAF\x95 v1"; // 测试 v1
+
+    auto r = spawn_cli({"project", "info", "set", out, "--title", cjk_title});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 0);
+
+    auto r2 = spawn_cli({"--json", "project", "info", "show", out});
+    INFO("show stdout: " << r2.stdout_text);
+    REQUIRE(r2.exit_code == 0);
+    REQUIRE(r2.stdout_text.find("\xE6\xB5\x8B\xE8\xAF\x95") != std::string::npos);
+}
+```
+
+- [ ] **Step 6: Register the e2e test in CMake**
+
+Modify `tests/cli/CMakeLists.txt`. In the e2e block (around line 22), add directly after `e2e/test_project_info.cpp`:
+```cmake
+    e2e/test_project_info.cpp
+    e2e/test_project_info_non_ascii.cpp
+```
+
+- [ ] **Step 7: Build**
 
 ```powershell
-git add tests/cli/roundtrip/test_non_ascii_metadata.cpp tests/cli/CMakeLists.txt
-git commit -m "test(cli): pin non-ASCII metadata roundtrip bug (red)"
+cmake --build build --target cli_tests --config Release --parallel 2
+```
+Expected: builds clean. The `bambu-cli` target also rebuilds because the e2e test depends on the exe.
+
+- [ ] **Step 8: Run the new e2e test, expect FAILURE**
+
+```powershell
+build\tests\cli\Release\cli_tests.exe "[info_set_non_ascii]"
+```
+Expected: FAIL. The em-dash case is the canonical Phase G reproduction:
+- `project info set` exit code != 0 (save_project rejects on invariant guard), OR
+- `project info set` succeeds but `project info show` returns description without the em-dash bytes (silent corruption), OR
+- `project info show` exit code != 0 (reload itself fails on invalid UTF-8 in the archive).
+
+If this test passes on the first run, **STOP** and report — that would mean either the bug is already fixed in some way we missed, or boost::process is doing UTF-8 transcoding we didn't expect. Either way, reshape needed.
+
+- [ ] **Step 9: Commit (one commit for both tests — green guard + argv red pin)**
+
+```powershell
+git add tests/cli/roundtrip/test_non_ascii_metadata.cpp `
+        tests/cli/e2e/test_project_info_non_ascii.cpp `
+        tests/cli/CMakeLists.txt
+git commit -m "test(cli): non-ASCII metadata regression guard + argv red pin"
 ```
 
 ---
 
-### Task 2: Investigate root cause and fix
+### Task 2: Apply argv-to-UTF-8 conversion at the CLI boundary (wmain on Windows)
 
 **Files:**
 - Create: `docs/cli/notes/2026-05-27-non-ascii-metadata-bug.md`
-- Modify: One of `src/libslic3r/Format/bbs_3mf.cpp` / `src/cli/main.cpp` / a different libslic3r site, chosen by the investigation below.
+- Modify: `src/cli/main.cpp`
 
-- [ ] **Step 1: Instrument the writer**
+**Root cause** (already established by Task 1's reshape):
+On Windows, narrow-main argv arrives in the active code page (typically
+windows-1252), not UTF-8. The em-dash gets translated from U+2014 to the
+single byte `0x97`, stored as-is in `model_info.description`, written into
+the metadata XML, and rejected by expat on reload as not well-formed UTF-8.
 
-Open `src/libslic3r/Format/bbs_3mf.cpp` and find the metadata write site (around line 7054):
-```cpp
-            // store metadata info
-            for (auto item : metadata_item_map) {
-                BOOST_LOG_TRIVIAL(info) << "bbs_3mf: save key= " << item.first << ", value = " << item.second;
-                stream << " <" << METADATA_TAG << " name=\"" << item.first << "\">"
-```
+The fix is to receive arguments as UTF-16 (`wmain`) and convert each
+argument to UTF-8 exactly once at the CLI entry point, before any string
+enters the ops layer.
 
-Add a hex-dump trace immediately before the `stream <<` call:
-```cpp
-            for (auto item : metadata_item_map) {
-                BOOST_LOG_TRIVIAL(info) << "bbs_3mf: save key= " << item.first << ", value = " << item.second;
-                {
-                    std::ostringstream hx;
-                    for (unsigned char c : item.second)
-                        hx << std::hex << std::setw(2) << std::setfill('0') << (int)c << ' ';
-                    BOOST_LOG_TRIVIAL(info) << "bbs_3mf: HEX(" << item.first << ") = " << hx.str();
-                }
-                stream << " <" << METADATA_TAG << " name=\"" << item.first << "\">"
-```
-
-(Add `#include <iomanip>` and `#include <sstream>` near the top of the file if not already present — both likely are; check first.)
-
-- [ ] **Step 2: Build + run the failing test with trace logging**
+- [ ] **Step 1: Inspect the current main.cpp entry point**
 
 ```powershell
+# Use Grep to find the main() definition
+```
+Identify: the signature of `main`, whether there's preamble code (logging
+init, exception wrapping), and the call into the command-dispatch logic.
+
+- [ ] **Step 2: Add a Windows-only UTF-8 argv adapter**
+
+Modify `src/cli/main.cpp`. The exact placement depends on the current
+file shape; the pattern is:
+
+```cpp
+// Top of file additions (under #ifdef _WIN32):
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
+
+// ... existing includes ...
+
+// Extract the existing main()'s body into a static helper:
+static int run_cli(int argc, char** argv) {
+    // ... whatever main currently does ...
+}
+
+#ifdef _WIN32
+// Receive UTF-16 argv from Windows, convert to UTF-8, then dispatch.
+// MSVC links wmain when present; we keep main() for non-Windows builds.
+int wmain(int argc, wchar_t** wargv) {
+    std::vector<std::string> utf8_storage;
+    utf8_storage.reserve(static_cast<size_t>(argc));
+    for (int i = 0; i < argc; ++i) {
+        const int needed = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1,
+                                               nullptr, 0, nullptr, nullptr);
+        std::string s(needed > 0 ? static_cast<size_t>(needed - 1) : 0, '\0');
+        if (needed > 0) {
+            WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1,
+                                &s[0], needed, nullptr, nullptr);
+        }
+        utf8_storage.push_back(std::move(s));
+    }
+    std::vector<char*> utf8_argv;
+    utf8_argv.reserve(utf8_storage.size() + 1);
+    for (auto& s : utf8_storage) utf8_argv.push_back(&s[0]);
+    utf8_argv.push_back(nullptr); // argv is conventionally NULL-terminated
+
+    // Also set the C runtime locale to UTF-8 so any stream prints in the
+    // CLI follow the same convention. (CRT default on modern Windows is
+    // ACP; setlocale with "" picks up the user's locale, which may not be
+    // UTF-8 — we want UTF-8 explicitly for output consistency.)
+    SetConsoleOutputCP(CP_UTF8);
+
+    return run_cli(argc, utf8_argv.data());
+}
+#else
+int main(int argc, char** argv) {
+    return run_cli(argc, argv);
+}
+#endif
+```
+
+**Notes:**
+- MSVC picks `wmain` over `main` when both are present in a Windows GUI/console app.
+- Do NOT keep a second `int main(int, char**)` on Windows alongside `wmain` — that causes a duplicate-symbol link error. The `#ifdef _WIN32` / `#else` guard ensures only one entry point per build.
+- If the existing `main()` does locale init, exception catching, or logging setup, preserve all of it inside `run_cli`. The wmain adapter is strictly an argv conversion shim.
+
+- [ ] **Step 3: Build**
+
+```powershell
+cmake --build build --target bambu-cli --config Release --parallel 2
 cmake --build build --target cli_tests --config Release --parallel 2
-$env:BOOST_LOG_TRIVIAL_LEVEL = "info"
-build\tests\cli\Release\cli_tests.exe "[non_ascii_metadata]" --success
 ```
-Expected: same FAIL as before, but trace lines now show `HEX(Description) = ...` with the actual bytes leaving `description` immediately before the stream write.
+Expected: builds clean. If MSVC complains about `wmain` vs `main` duplicate
+entry points, double-check the `#ifdef _WIN32` / `#else` placement.
 
-- [ ] **Step 3: Hex-dump the saved archive's 3D/3dmodel.model entry**
+- [ ] **Step 4: Run the new e2e test, expect PASS**
 
-The test prints `INFO("save error_code: ...")` only on failure; to capture the saved file independently, comment out the `fs::remove(out);` line at the end of the test temporarily and re-run. Then inspect the failed-save output:
 ```powershell
-# After failed run, the temp file may or may not still exist depending on
-# whether save_project deleted it. If guard ran and rejected, the file is
-# at <out>.tmp.3mf — find it:
-Get-ChildItem $env:TEMP -Filter "nonascii-*" -ErrorAction SilentlyContinue
+build\tests\cli\Release\cli_tests.exe "[info_set_non_ascii]"
 ```
-Open the tmp file with 7-zip or `unzip -l` equivalent (miniz CLI works), extract `3D/3dmodel.model`, and find the `<metadata name="Description">` line. Compare its bytes to the HEX log from Step 2.
+Expected: PASS — both em-dash and CJK round-trip cleanly through the
+subprocess.
 
-- [ ] **Step 4: Classify root cause and write the findings note**
+- [ ] **Step 5: Run the full suite**
+
+```powershell
+build\tests\cli\Release\cli_tests.exe --order rand
+```
+Expected: ALL pass. Assertion count must exceed the post-Task-1 count.
+
+- [ ] **Step 6: Write the findings note**
 
 Create `docs/cli/notes/2026-05-27-non-ascii-metadata-bug.md`:
 ```markdown
-# Non-ASCII metadata roundtrip bug — root cause (2026-05-27)
+# Non-ASCII metadata roundtrip bug — root cause and fix (2026-05-27)
 
 ## Symptom
 Em-dash (U+2014) in `model_info.description` caused `save_project` to fail
@@ -245,105 +403,42 @@ at line 7" on reload. Surfaced during Phase G manual GUI smoke (2026-05-27);
 worked around at the time by using ASCII-only description.
 
 ## Investigation
-[Hex-dump comparison from Steps 2-3:]
-- Bytes leaving `description` at bbs_3mf.cpp:7054: <FILL IN OBSERVED BYTES>
-- Bytes in saved archive's 3D/3dmodel.model line 7: <FILL IN OBSERVED BYTES>
+Initial hypothesis was writer- or reader-side mangling of valid UTF-8 bytes
+in `bbs_3mf.cpp`. Task 1 added a programmatic round-trip test
+(`tests/cli/roundtrip/test_non_ascii_metadata.cpp`) that sets
+`description` to a UTF-8 em-dash directly on `model_info`, saves, and
+reloads. That test PASSED on the first run — proving the writer, expat
+reader, and `xml_escape` all handle UTF-8 correctly.
 
 ## Root cause
-<one of:>
-- **Writer-side:** the output stream applied codepage conversion to UTF-8
-  bytes, mangling them on disk. Affected sites: <list>.
-- **Reader-side:** the expat parser is configured with a non-UTF-8 encoding
-  override at <site>; UTF-8 input is mis-interpreted.
-- **Other:** <describe>.
+The bug is in the CLI argv path on Windows. The narrow-main signature
+(`int main(int, char**)`) receives arguments converted from the user's
+UTF-16 console input via the active code page (typically windows-1252).
+An em-dash typed in PowerShell or cmd.exe arrives as the single byte
+`0x97` (windows-1252) rather than the UTF-8 sequence `E2 80 94`. That
+byte is stored verbatim in `description`, written into the metadata XML
+declared as UTF-8, and correctly rejected by expat on reload as not
+well-formed UTF-8 (single continuation byte without a leader).
 
 ## Fix
-<one of:>
-- Replaced `<stream type>` with `<utf-8-clean alternative>` at <site>.
-- Removed/corrected the expat encoding override at <site>.
-- <other>.
+`src/cli/main.cpp` now uses `wmain` on Windows. UTF-16 argv is converted
+to UTF-8 via `WideCharToMultiByte(CP_UTF8, ...)` once at the entry
+point, before any string enters the ops layer. Non-Windows builds keep
+the conventional `int main(int, char**)`. `SetConsoleOutputCP(CP_UTF8)`
+is set so CLI stdout/stderr also emit UTF-8 consistently.
 
 ## Pinned by
-`tests/cli/roundtrip/test_non_ascii_metadata.cpp` (added in commit before
-this fix).
+- `tests/cli/roundtrip/test_non_ascii_metadata.cpp` — green regression
+  guard for the programmatic path.
+- `tests/cli/e2e/test_project_info_non_ascii.cpp` — red→green pin for
+  the CLI argv path on Windows.
 ```
 
-Fill in the angle-bracketed sections with the actual findings.
-
-- [ ] **Step 5: Apply the fix — pick the branch that matches your findings**
-
-**Branch A — Writer-side (stream codepage conversion).** Most likely culprit on Windows: the `stream` is a `boost::nowide::ofstream` or wraps one that applies narrow-to-wide conversion. Locate the `stream` declaration upstream of `bbs_3mf.cpp:7054` and confirm its type. If it's a `boost::nowide::ofstream`, swap to a binary-mode `std::ofstream`:
-```cpp
-// Find the existing declaration (likely around bbs_3mf.cpp:6940-ish):
-// boost::nowide::ofstream stream(path.string());
-// Replace with:
-std::ofstream stream(path.string(), std::ios::binary);
-```
-If `stream` is a `std::stringstream` accumulator that gets written via a separate code path, find the actual file-write site (`mz_zip_writer_add_mem` for in-memory; `mz_zip_writer_add_file` for on-disk) and verify the bytes aren't transformed in between.
-
-**Branch B — CLI-input-side (argv encoded as windows-1252).** This branch only applies if the bug also manifests when running `bambu-cli.exe project info set --description "—"` from a terminal AND the bytes leaving description in Step 2 are *already* malformed before reaching `bbs_3mf.cpp`. In that case the bug is in `src/cli/main.cpp`:
-```cpp
-// In main() near argv parsing — switch to wmain on Windows and convert UTF-16
-// to UTF-8 once at the entry point.
-#ifdef _WIN32
-int wmain(int argc, wchar_t** wargv) {
-    std::vector<std::string> args_utf8;
-    args_utf8.reserve(static_cast<size_t>(argc));
-    for (int i = 0; i < argc; ++i) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
-        std::string s(static_cast<size_t>(len > 0 ? len - 1 : 0), '\0');
-        if (len > 0) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, &s[0], len, nullptr, nullptr);
-        args_utf8.push_back(std::move(s));
-    }
-    std::vector<char*> argv_utf8;
-    argv_utf8.reserve(args_utf8.size());
-    for (auto& a : args_utf8) argv_utf8.push_back(&a[0]);
-    return real_main(argc, argv_utf8.data());
-}
-int main(int argc, char** argv) { return real_main(argc, argv); }
-#else
-int main(int argc, char** argv) { return real_main(argc, argv); }
-#endif
-```
-Move the body of the existing `main` into `real_main(int, char**)`. Include `<windows.h>` under `#ifdef _WIN32`.
-
-**Branch C — Reader-side (expat encoding override).** Search `bbs_3mf.cpp` for `XML_ParserCreate` or `XML_ParserCreateNS`:
-```powershell
-# Use Grep (NOT bash grep)
-```
-If a parser is created with a non-null encoding argument (e.g. `XML_ParserCreate("US-ASCII")`), change it to `XML_ParserCreate(nullptr)` so expat honors the XML declaration.
-
-**Branch D — None of the above.** STOP. The Phase A.4 stop condition in the spec applies: report findings and reassess scope before continuing.
-
-- [ ] **Step 6: Remove the instrumentation**
-
-Revert the hex-dump trace block added in Step 1 — it was diagnostic only. The file should otherwise match its pre-Step-1 state plus the chosen fix from Step 5.
-
-- [ ] **Step 7: Re-enable test cleanup**
-
-If you commented out `fs::remove(out);` in Step 3, uncomment both occurrences in `tests/cli/roundtrip/test_non_ascii_metadata.cpp`.
-
-- [ ] **Step 8: Build + run**
+- [ ] **Step 7: Commit (green)**
 
 ```powershell
-cmake --build build --target cli_tests --config Release --parallel 2
-build\tests\cli\Release\cli_tests.exe "[non_ascii_metadata]"
-```
-Expected: PASS for both cases.
-
-- [ ] **Step 9: Run the full suite**
-
-```powershell
-build\tests\cli\Release\cli_tests.exe --order rand
-```
-Expected: ALL pass. Assertion count > 1324.
-
-- [ ] **Step 10: Commit (green)**
-
-```powershell
-git add docs/cli/notes/2026-05-27-non-ascii-metadata-bug.md
-git add <the production source file you modified in Step 5>
-git commit -m "fix: non-ASCII metadata roundtrip (utf-8 clean writer/reader path)"
+git add docs/cli/notes/2026-05-27-non-ascii-metadata-bug.md src/cli/main.cpp
+git commit -m "fix(cli): convert argv via wmain on Windows for utf-8 input"
 ```
 
 Adjust the commit message subject to match the actual fix branch:
