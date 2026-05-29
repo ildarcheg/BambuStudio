@@ -427,3 +427,82 @@ TEST_CASE("plate_arrange: too-many-objects -> PlacementFailure + state rollback"
         REQUIRE(post[i].y() == Approx(pre[i].y()));
     }
 }
+
+TEST_CASE("object add (default): single copy lands at plate centroid + Z drop",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    // Call add_object_to_plate with NO transform — this is the new
+    // default path (replaces sqrt-grid).
+    bambu_cli::ObjectRef ref;
+    auto r = bambu_cli::add_object_to_plate(
+        s, REF_PLATE_1,
+        bambu_cli_unit::fixture_stl("cube.stl"),
+        "DefaultPlaced", -1, nullptr, 1, &ref);
+    REQUIRE(r.ok);
+
+    auto* inst = s.model.objects[ref.object_idx]->instances[ref.instance_idx];
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[ref.object_idx]->instance_bounding_box(ref.instance_idx, false);
+
+    // XY centered on plate bed.
+    const auto& pa = s.project_config.option<Slic3r::ConfigOptionPoints>(
+        "printable_area")->values;
+    double cx = 0, cy = 0;
+    for (const auto& p : pa) { cx += p.x(); cy += p.y(); }
+    cx /= pa.size(); cy /= pa.size();
+    REQUIRE(0.5 * (bb.min.x() + bb.max.x()) == Approx(cx).margin(0.5));
+    REQUIRE(0.5 * (bb.min.y() + bb.max.y()) == Approx(cy).margin(0.5));
+    // Z dropped to bed.
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.001));
+}
+
+TEST_CASE("object add (default, count 3): all copies stack at plate centroid",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    bambu_cli::ObjectRef ref;
+    auto r = bambu_cli::add_object_to_plate(
+        s, REF_PLATE_1,
+        bambu_cli_unit::fixture_stl("cube.stl"),
+        "StackedDefault", -1, nullptr, 3, &ref);
+    REQUIRE(r.ok);
+
+    // Three model objects with name "StackedDefault", all offsets equal.
+    std::vector<Slic3r::Vec3d> offsets;
+    for (auto* obj : s.model.objects)
+        if (obj->name == "StackedDefault")
+            for (auto* inst : obj->instances)
+                offsets.push_back(inst->get_offset());
+    REQUIRE(offsets.size() == 3);
+    for (size_t i = 1; i < offsets.size(); ++i) {
+        REQUIRE(offsets[i].x() == Approx(offsets[0].x()).margin(0.001));
+        REQUIRE(offsets[i].y() == Approx(offsets[0].y()).margin(0.001));
+        REQUIRE(offsets[i].z() == Approx(offsets[0].z()).margin(0.001));
+    }
+}
+
+TEST_CASE("object add (manual transform): centering NOT applied when "
+          "--translate is supplied", "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    bambu_cli::ManualTransform tf;
+    tf.has_translate = true;
+    tf.tx = 30.0; tf.ty = 30.0; tf.tz = 0.0;
+
+    bambu_cli::ObjectRef ref;
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, REF_PLATE_1, bambu_cli_unit::fixture_stl("cube.stl"),
+        "ManualPlaced", -1, &tf, 1, &ref).ok);
+
+    auto* inst = s.model.objects[ref.object_idx]->instances[ref.instance_idx];
+    // Manual mode places the cube *centered on the manual offset*, per
+    // existing stack_offset semantics in add_object_to_plate. So the
+    // resulting world offset should reflect the supplied (tx, ty), NOT
+    // the plate centroid.
+    REQUIRE(inst->get_offset().x() == Approx(30.0).margin(0.5));
+    REQUIRE(inst->get_offset().y() == Approx(30.0).margin(0.5));
+}

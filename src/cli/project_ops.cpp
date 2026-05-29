@@ -256,15 +256,6 @@ OpResult add_object_to_plate(ProjectState& state,
     double plate_bed_maxx = bed_maxx + plate_origin.x();
     double plate_bed_maxy = bed_maxy + plate_origin.y();
 
-    // Pre-compute sqrt-grid parameters (derived from total copies, not loop index).
-    // CRITICAL: grid_cols must come from N (batch size), not from i+1.
-    const double auto_margin  = 10.0;
-    const double default_cell = 20.0;
-    const double cell_x = std::max(bbox.size().x() + auto_margin, default_cell);
-    const double cell_y = std::max(bbox.size().y() + auto_margin, default_cell);
-    const int grid_cols = static_cast<int>(
-        std::ceil(std::sqrt(static_cast<double>(copies))));
-
     // Stacking transform (manual mode).
     static const double DEG2RAD = 0.01745329251994329577;
     Slic3r::Vec3d stack_offset = Slic3r::Vec3d::Zero();
@@ -315,16 +306,16 @@ OpResult add_object_to_plate(ProjectState& state,
             inst_k->set_rotation(stack_rot);
             inst_k->set_scaling_factor(stack_scale);
         } else {
-            // Auto-grid mode: sqrt-grid layout, cols derived from total copies.
-            int col = k % grid_cols;
-            int row = k / grid_cols;
+            // Default placement (2026-05-29): center on plate XY + drop Z.
+            // Replaces the prior sqrt-grid layout. All N copies share the same
+            // offset (stacked at the bed centroid). Users who want spread-out
+            // copies invoke `plate arrange` afterwards.
+            const double plate_center_x = 0.5 * (plate_bed_minx + plate_bed_maxx);
+            const double plate_center_y = 0.5 * (plate_bed_miny + plate_bed_maxy);
             Slic3r::Vec3d offset(
-                plate_bed_minx + auto_margin + col * cell_x
-                    + bbox.size().x() * 0.5 - bbox.center().x(),
-                plate_bed_miny + auto_margin + row * cell_y
-                    + bbox.size().y() * 0.5 - bbox.center().y(),
-                -bbox.min.z()   // place object base on bed
-            );
+                plate_center_x - bbox.center().x(),
+                plate_center_y - bbox.center().y(),
+                -bbox.min.z());
             inst_k->set_offset(offset);
             inst_k->set_rotation(Slic3r::Vec3d::Zero());
             inst_k->set_scaling_factor(Slic3r::Vec3d(1, 1, 1));
