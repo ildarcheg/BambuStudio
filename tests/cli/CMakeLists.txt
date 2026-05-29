@@ -51,6 +51,7 @@ set(BAMBU_CLI_TEST_SOURCES
     # (2026-05-22).
     roundtrip/test_project_init.cpp
     roundtrip/test_plate.cpp
+    roundtrip/test_plate_layout.cpp
     roundtrip/test_save_atomic.cpp
     roundtrip/test_output_flag.cpp
     roundtrip/test_split.cpp
