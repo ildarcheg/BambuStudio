@@ -205,6 +205,17 @@ Slic3r::Vec3d plate_world_origin(int plate_index_1based, int total_plates,
 //   exit 6 (unknown_reference) — plate not found
 OpResult plate_center(ProjectState& state, const std::string& plate_name);
 
+// Drop every instance on <plate_name> so its world-space mesh min-Z equals 0.
+// XY unchanged on each instance. Computes per-volume world matrix
+// (instance × volume) and iterates the volume's convex hull only, NOT
+// the full mesh — same algorithm as the GUI's
+// GLVolume::world_matrix() + ModelVolume::get_convex_hull() at
+// slic3r/GUI/Gizmos/GizmoObjectManipulation.cpp:36-50. Empty plate:
+// success no-op.
+// Errors:
+//   exit 6 (unknown_reference) — plate not found
+OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name);
+
 // ---- D2: object merge-parts -----------------------------------------------
 
 // Parameters for merge_object_parts. --parts must be non-empty (validated by

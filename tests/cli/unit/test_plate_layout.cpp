@@ -149,3 +149,80 @@ TEST_CASE("plate_center: plate-2 honors world stride",
         REQUIRE(inst->get_offset().y() == Approx(target.y()).margin(0.01));
     }
 }
+
+TEST_CASE("plate_drop_to_bed: instance above bed sinks to z=0",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 25));
+    auto* inst = s.model.objects[oi]->instances[ii];
+
+    auto r = bambu_cli::plate_drop_to_bed(s, REF_PLATE_1);
+    REQUIRE(r.ok);
+
+    // After drop, world-space min-Z of the mesh must be ~0.
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[oi]->instance_bounding_box(ii, false);
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.001));
+}
+
+TEST_CASE("plate_drop_to_bed: instance sunk into bed rises to z=0",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, -5));
+
+    auto r = bambu_cli::plate_drop_to_bed(s, REF_PLATE_1);
+    REQUIRE(r.ok);
+
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[oi]->instance_bounding_box(ii, false);
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.001));
+}
+
+TEST_CASE("plate_drop_to_bed: XY unchanged",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(33, 44, 20));
+    auto* inst = s.model.objects[oi]->instances[ii];
+    const double pre_x = inst->get_offset().x();
+    const double pre_y = inst->get_offset().y();
+
+    REQUIRE(bambu_cli::plate_drop_to_bed(s, REF_PLATE_1).ok);
+    REQUIRE(inst->get_offset().x() == Approx(pre_x));
+    REQUIRE(inst->get_offset().y() == Approx(pre_y));
+}
+
+TEST_CASE("plate_drop_to_bed: rotated instance — uses world matrix not naive bbox",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 30));
+    auto* inst = s.model.objects[oi]->instances[ii];
+    // Rotate 45° around X — this changes the world-space min-Z relative
+    // to the unrotated bbox. The implementation must compose
+    // instance × volume transforms, not just translate.
+    inst->set_rotation(Slic3r::Vec3d(M_PI * 0.25, 0, 0));
+
+    REQUIRE(bambu_cli::plate_drop_to_bed(s, REF_PLATE_1).ok);
+
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[oi]->instance_bounding_box(ii, false);
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.001));
+}
+
+TEST_CASE("plate_drop_to_bed: unknown plate -> std::out_of_range",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE_THROWS_AS(bambu_cli::plate_drop_to_bed(s, "NoSuchPlate"),
+                      std::out_of_range);
+}
+
+TEST_CASE("plate_drop_to_bed: empty plate is success no-op",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::plate_drop_to_bed(s, REF_PLATE_1).ok);
+}

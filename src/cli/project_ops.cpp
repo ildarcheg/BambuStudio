@@ -1228,4 +1228,46 @@ OpResult plate_center(ProjectState& state, const std::string& plate_name) {
     OpResult r; r.ok = true; return r;
 }
 
+// World-space min-Z across all volumes of a single instance, using each
+// volume's convex hull (typically 10-100 verts) rather than the full mesh
+// (up to ~100K verts). Mathematically equivalent — the lowest-Z vertex
+// is always extreme and therefore on the hull — but materially faster
+// for batch composition with many instances.
+//
+// Composes instance × volume transforms (matches GUI's
+// GLVolume::world_matrix at slic3r/GUI/Gizmos/GizmoObjectManipulation.cpp:38).
+// Missing the volume transform mis-drops multi-volume objects loaded
+// from a multi-part 3MF.
+static double instance_world_min_z(const Slic3r::ModelObject& obj,
+                                   const Slic3r::ModelInstance& inst) {
+    const Slic3r::Transform3d inst_m = inst.get_transformation().get_matrix();
+    double min_z = std::numeric_limits<double>::max();
+    for (const auto* mv : obj.volumes) {
+        if (!mv) continue;
+        const Slic3r::Transform3d world_m =
+            inst_m * mv->get_transformation().get_matrix();
+        const Slic3r::TriangleMesh& hull = mv->get_convex_hull();
+        for (const auto& v : hull.its.vertices) {
+            const Slic3r::Vec3d w = world_m * v.cast<double>();
+            if (w.z() < min_z) min_z = w.z();
+        }
+    }
+    return (min_z == std::numeric_limits<double>::max()) ? 0.0 : min_z;
+}
+
+OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    for (const auto& [oi, ii] : pairs) {
+        const auto& obj = *state.model.objects[oi];
+        auto* inst = state.model.objects[oi]->instances[ii];
+        const double mz = instance_world_min_z(obj, *inst);
+        const auto off = inst->get_offset();
+        inst->set_offset(Slic3r::Vec3d(off.x(), off.y(), off.z() - mz));
+    }
+    OpResult r; r.ok = true; return r;
+}
+
 } // namespace bambu_cli
