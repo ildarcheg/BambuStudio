@@ -243,6 +243,32 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
             return merge_object_parts(state, mpa->name, p);
         }, overrides);
     });
+
+    // --- object auto-orient -----------------------------------------------
+    // Group-by-name semantics: orients all instances of every ModelObject
+    // whose name matches. Each instance drops to bed after orient.
+    {
+        struct A { std::string in, name, out; };
+        auto* sc = object->add_subcommand("auto-orient",
+            "auto-orient an object (all clones if group-by-name) and drop to bed");
+        auto a = std::make_shared<A>();
+        sc->add_option("in", a->in, "input .3mf")->required();
+        sc->add_option("--name", a->name, "object name (all clones oriented)")->required();
+        sc->add_option("--output", a->out, "output .3mf (defaults to in-place)");
+        sc->callback([a, mode_out]() {
+            OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                              ? OutputMode::Json : OutputMode::Text;
+            const std::string& out = a->out.empty() ? a->in : a->out;
+            MutationExceptionMap overrides = {
+                {std::type_index(typeid(std::runtime_error)),
+                 {7, "invalid_state"}}
+            };
+            run_mutation(mode, a->in, out, [&](ProjectState& s) {
+                object_auto_orient(s, a->name);
+                return "object auto-oriented: " + a->name;
+            }, overrides);
+        });
+    }
 }
 
 } // namespace bambu_cli

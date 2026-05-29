@@ -18,6 +18,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_object_remove_set_filament.cpp
     e2e/test_object_split.cpp
     e2e/test_object_merge.cpp
+    e2e/test_object_auto_orient.cpp
     e2e/test_config.cpp
     e2e/test_json_and_exit_codes.cpp
     e2e/test_project_info.cpp
