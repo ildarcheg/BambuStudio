@@ -63,6 +63,17 @@ Out of scope (explicit):
 - Full GUI parameter passthrough for arrange (min-distance, allow-rotation
   override, align-to-y-axis, bed-shrink, sequential-print toggle). Defaults
   pulled from project config; no CLI flags.
+- Honoring the project's slice-time `allow_rotations` preference: the CLI
+  forces `params.allow_rotations = true` after `update_arrange_params`
+  populates from config. Deliberate divergence from `BambuStudio.cpp:5351`,
+  which reads the caller-supplied value. Rationale: headless batch
+  composition benefits unconditionally from rotation freedom, and there's
+  no CLI flag to override (per "sane defaults only").
+- Tolerating malformed `bed_exclude_area` (point count not a multiple of 4).
+  The CLI rejects with exit 1; the GUI (`PartPlate.cpp:376-389`) silently
+  drops trailing partial groups. Stricter-than-GUI is intentional —
+  malformed config in headless composition should fail loudly, not be
+  silently truncated.
 - Sequential-print mode handling beyond reading `print_sequence` from
   config and propagating as `ArrangeParams::is_seq_print`. No special
   per-plate sequential-print overrides.
@@ -75,7 +86,7 @@ Out of scope (explicit):
   add` sqrt-grid behaviour. Behaviour change is total; tests that pin old
   coordinates get updated.
 - New exit codes. All errors map to existing codes.
-- New exception types. `PlacementFailureError` is reused.
+- New exception types. `PlacementFailure` is reused.
 - Install rule for `bambu-cli`. Continues to ship from `build/`.
 
 ## Decisions reached during brainstorming
@@ -155,7 +166,17 @@ OpResult object_auto_orient(ProjectState& state, const std::string& object_name)
 // In src/cli/project_ops.cpp (file-local, not in header)
 
 // Returns the (obj_idx, instance_idx) pairs of every instance belonging
-// to <plate_name>, sourced from state.plate_data[i]->obj_inst_map.
+// to <plate_name>, sourced from state.plate_data[i]->objects_and_instances.
+// Looks up the plate by matching <plate_name> against PlateData::plate_name
+// (case-sensitive, exact match — matches existing rename_plate / remove_plate
+// lookup convention in project_ops.cpp).
+//
+// NOTE: do NOT iterate obj_inst_map for this purpose. After bbs_3mf load,
+// obj_inst_map's key is not guaranteed to be the in-memory obj_idx and its
+// value semantics are (instance_idx, loaded_id). The canonical (obj_idx,
+// instance_idx) mapping lives in objects_and_instances, which io.cpp:55-73
+// rebuilds via loaded_id_to_loc at load time.
+//
 // Throws std::out_of_range if no plate matches <plate_name>.
 // Empty vector means the plate exists but has no objects (caller decides
 // whether that's success no-op or error — for all four current callers,
@@ -231,28 +252,55 @@ pattern already established in `object split-to-parts` and `merge-parts`
 ### `plate_drop_to_bed(state, plate_name)`
 1. `auto pairs = collect_plate_instances(state, plate_name)`.
 2. For each `(oi, ii)`:
-   - Compute world-space min-Z of `model.objects[oi]->volumes[*]->mesh`
-     transformed by `inst->get_transformation().get_matrix()`. Mirrors the
-     algorithm in `src/slic3r/GUI/Gizmos/GizmoObjectManipulation.cpp:36`
-     (`get_volume_min_z(GLVolume*)`), but operating on `ModelVolume::mesh`
-     directly since we don't have `GLVolume` in the CLI.
+   - Compute world-space min-Z across all volumes of the object. For each
+     `mv` in `model.objects[oi]->volumes`:
+     - Build the world matrix as `inst->get_transformation().get_matrix()
+       * mv->get_transformation().get_matrix()` (i.e., instance ×
+       volume). This is the CLI's equivalent of the GUI's
+       `volume->world_matrix()` at `Gizmo...:38`, which already composes
+       both transforms. Missing the volume transform mis-drops
+       multi-volume objects (parts loaded from a multi-part 3MF).
+     - Iterate `mv->get_convex_hull().its.vertices` (NOT the full mesh's
+       vertices). The lowest-Z vertex of a mesh is always extreme and
+       therefore on the convex hull, so min-Z is mathematically
+       identical — but hulls are typically 10–100 verts vs. up to ~100K
+       for a full STL. Matters for headless batch composition.
+     - Track the global min `world_min_z = min(world_min_z, world_matrix
+       * vert).z()` across all volumes.
    - `inst->set_offset(inst->get_offset() - Vec3d(0, 0, world_min_z))`.
 3. Empty `pairs` → return success.
 
 ### `plate_arrange(state, plate_name)`
 1. `auto pairs = collect_plate_instances(state, plate_name)`.
 2. Empty → return success.
-3. Build `ArrangePolygons items`: for each `(oi, ii)` call
+3. Compute world-space plate origin via existing
+   `plate_world_origin(plate_idx_1based, total_plates, bed_w, bed_h)`.
+   For plate 1 this is `(0,0,0)`; for plates ≥ 2 it carries the BBS
+   stride.
+4. Build `ArrangePolygons items`: for each `(oi, ii)` call
    `get_instance_arrange_poly(state.model.objects[oi]->instances[ii],
                               state.project_config)`
-   (already declared in `libslic3r/ModelArrange.hpp`).
-4. Build excludes: read `bed_exclude_area` from `state.project_config`
+   (already declared in `libslic3r/ModelArrange.hpp`). The returned
+   `item.translation` is in world coords
+   (`Model.cpp:4240`: `Vec2crd{scaled(get_offset(X)),
+   scaled(get_offset(Y))}`). The arrange engine treats `translation` as
+   the item's current bed-local position when nesting; passing world
+   coords for a plate ≥ 2 instance would put the item way outside
+   bed-local bounds. **Normalize to plate-local** immediately after
+   construction:
+   `item.translation -= Vec2crd(scaled(plate_origin.x()),
+   scaled(plate_origin.y()))`.
+5. Build excludes: read `bed_exclude_area` from `state.project_config`
    (a `ConfigOptionPoints`). May be empty. Validate: point count must be
    a multiple of 4 (Bambu's convention — consecutive groups of 4 points
-   form rectangular zones); else `throw std::invalid_argument`. Each
-   rectangle becomes one `ArrangePolygon` in the excludes vector,
-   coordinates scaled via `Slic3r::scale_()`.
-5. Initialize `ArrangeParams params{}`, then call
+   form rectangular zones); else `throw std::invalid_argument`. For each
+   rectangle, push one `ArrangePolygon` onto the excludes vector with:
+   - `poly.contour` = the four scaled points.
+   - `bed_idx = 0` (explicit — default is 0 but the GUI sets it
+     explicitly at `PartPlate.cpp:5815`; we match for clarity and to
+     avoid drift if the default ever changes).
+   - `is_virt_object = true`.
+6. Initialize `ArrangeParams params{}`, then call
    `arrangement::update_arrange_params(params, state.project_config, items)`
    followed by `arrangement::update_selected_items_inflation(items,
    state.project_config, params)`. Both declared in `Arrange.hpp:189-191`
@@ -261,9 +309,9 @@ pattern already established in `object split-to-parts` and `merge-parts`
    `min_obj_distance`, `cleareance_radius`, `printable_height`,
    `clearance_height_to_rod/lid`, `is_seq_print`, and so on from
    `project_config`. Force `params.allow_rotations = true` afterwards
-   (headless pipelines benefit from rotation; the GUI default agrees).
-   Leave `bed_shrink_x` / `bed_shrink_y` at 0.
-6. Build bed via `Points bedpts = arrangement::get_shrink_bedpts(
+   (deliberate CLI divergence; see "Out of scope"). Leave `bed_shrink_x`
+   / `bed_shrink_y` at 0.
+7. Build bed via `Points bedpts = arrangement::get_shrink_bedpts(
    state.project_config, params)` (declared in `Arrange.hpp:195`,
    returns the bed polygon points respecting `bed_shrink_*`). The
    `arrange(items, excludes, const Points& bed, params)` overload at
@@ -271,19 +319,22 @@ pattern already established in `object split-to-parts` and `merge-parts`
    vs. circular). Validate: `bedpts.size() >= 3`; else
    `throw std::invalid_argument("arrange: project has no usable
    printable_area")`.
-7. Call `arrangement::arrange(items, excludes, bedpts, params)`.
-8. Overflow check: iterate `items`. If any `item.bed_idx != 0`, count
-   them and `throw PlacementFailureError("arrange: N object(s) did not
-   fit on plate '<name>'")`. State unmodified at this point — instances
+8. Call `arrangement::arrange(items, excludes, bedpts, params)`. After
+   the call, each `item.translation` is the final bed-local position
+   the engine nested it at (verified via `PartPlate.cpp:5980-5981` which
+   uses `+=` to add plate stride for plates ≥ 2; this proves arrange
+   overwrites `translation` to bed-local, doesn't preserve world input).
+9. Overflow check: iterate `items`. If any `item.bed_idx != 0`, count
+   them and `throw PlacementFailure("arrange: N object(s) did not fit
+   on plate '<name>'")`. State unmodified at this point — instances
    still hold pre-arrange offsets.
-9. Apply: compute world-space plate origin via existing
-   `plate_world_origin(plate_idx_1based, total_plates, bed_w, bed_h)`.
-   For each `(item, pair)` in `(items, pairs)`:
-   - `Vec3d new_offset(plate_origin.x() + unscale_(item.translation.x()),
-                       plate_origin.y() + unscale_(item.translation.y()),
-                       inst->get_offset().z())`
-   - `inst->set_offset(new_offset)`
-   - `inst->set_rotation(Vec3d(0, 0, item.rotation))`
+10. Apply: for each `(item, (oi, ii))`:
+    - `inst = state.model.objects[oi]->instances[ii]`
+    - `Vec3d new_offset(plate_origin.x() + unscale_(item.translation.x()),
+                        plate_origin.y() + unscale_(item.translation.y()),
+                        inst->get_offset().z())`
+    - `inst->set_offset(new_offset)`
+    - `inst->set_rotation(Vec3d(0, 0, item.rotation))`
 
 ### `plate_auto_orient(state, plate_name)`
 1. `auto pairs = collect_plate_instances(state, plate_name)`.
@@ -298,8 +349,9 @@ pattern already established in `object split-to-parts` and `merge-parts`
    object_name`. Empty → `throw std::out_of_range`.
 2. For each matched `obj_idx`, for each of its instances `ii`:
    - `orientation::orient(obj->instances[ii])`
-   - Compute world-space mesh min-Z of `obj->volumes[*]->mesh` transformed
-     by `obj->instances[ii]->get_transformation().get_matrix()`.
+   - Compute world-space min-Z using the same per-volume hull algorithm
+     as `plate_drop_to_bed` step 2 (composed `instance × volume`
+     transform; iterate `mv->get_convex_hull().its.vertices` only).
    - `obj->instances[ii]->set_offset(obj->instances[ii]->get_offset() -
      Vec3d(0, 0, world_min_z))`.
 
@@ -315,20 +367,20 @@ exit code → JSON / text response → state rolled back if appropriate.
 | All four `plate_*` | plate empty | none | 0 (noop) |
 | `plate arrange` | bed shape (`get_shrink_bedpts`) yields < 3 pts | `std::invalid_argument` | 1 (override) |
 | `plate arrange` | `bed_exclude_area` point count not a multiple of 4 | `std::invalid_argument` | 1 (override) |
-| `plate arrange` | overflow (any `bed_idx != 0`) | `PlacementFailureError` | 9 |
+| `plate arrange` | overflow (any `bed_idx != 0`) | `PlacementFailure` | 9 |
 | `plate auto-orient` | orient engine failure | `std::runtime_error` | 7 (override) |
 | `object auto-orient` | `--name` not supplied | CLI11 | 1 |
 | `object auto-orient` | name matches no object | `std::out_of_range` | 6 |
 | `object auto-orient` | orient engine failure | `std::runtime_error` | 7 (override) |
 
-`PlacementFailureError` already exists in the CLI's exception hierarchy
+`PlacementFailure` already exists in the CLI's exception hierarchy
 (used by `add_object_to_plate`'s off-bed check). Reused, not redefined.
 
 State rollback is implicit: `run_mutation` operates on a `ProjectState`
 that's discarded if the mutator throws. The arrange overflow check
-(step 8 of `plate_arrange`) deliberately runs **before** any
-`inst->set_offset()` calls, so a thrown overflow leaves instance offsets
-untouched — no half-arranged plate left in memory.
+(step 9 of `plate_arrange`) deliberately runs **before** any
+`inst->set_offset()` calls (step 10), so a thrown overflow leaves
+instance offsets untouched — no half-arranged plate left in memory.
 
 The post-write invariant guard (`invariant_guard.cpp`'s three checks:
 rels target resolution, per-plate thumbnails, vector-config roundtrip)
@@ -438,6 +490,11 @@ many copies of one existing STL rather than a new fixture.
   one `object auto-orient` commands. Each step ends with a "[ ] GUI
   open-and-verify" gate consistent with the existing M1–M10 pattern.
 - `docs/cli/status.md`: new milestone entry for this feature set.
+- `docs/cli/notes/2026-05-29-drop-to-bed-hull-vs-mesh.md`: one-pager
+  explaining why drop-to-bed iterates the convex hull instead of the
+  full mesh (perf for batch composition; mathematically identical min-Z
+  result). Land alongside the implementation so future maintainers
+  don't "fix" it by switching to full mesh.
 - `CLAUDE.md`: no update needed — feature lands on master via standard PR
   flow, and the architecture summary still holds (no new modules, no link
   surface changes, no new divergences).
