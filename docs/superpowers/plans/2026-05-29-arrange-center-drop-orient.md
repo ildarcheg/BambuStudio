@@ -133,19 +133,23 @@ std::pair<int,int> add_cube_at(ProjectState& s,
     return {ref.object_idx, ref.instance_idx};
 }
 
-// Plate centroid in world coords, for a project loaded from the
-// canonical reference (standard Bambu X1 bed: 256x256, plate 1 origin
-// 0,0). Returns the XY centroid for the named plate.
+// Plate centroid in world coords. Mirrors production's plate_bed_info()
+// math — uses min/max bed extent rather than indexed corners so it
+// stays correct on non-rectangular beds (Delta) even though the
+// canonical fixture is a rectangular Bambu X1 bed.
 Slic3r::Vec2d expected_plate_center_world(const ProjectState& s,
                                           const std::string& plate_name) {
-    // Bed extent from project_config["printable_area"] is a rectangle of
-    // 4 points; centroid = average of all 4 points. Plate world origin
-    // adds BBS stride for plates beyond plate 1.
     const auto& pa = s.project_config.option<Slic3r::ConfigOptionPoints>(
         "printable_area")->values;
-    REQUIRE(pa.size() >= 4);
+    REQUIRE(pa.size() >= 3);
     double cx = 0, cy = 0;
-    for (const auto& p : pa) { cx += p.x(); cy += p.y(); }
+    double min_x = pa.front().x(), max_x = min_x;
+    double min_y = pa.front().y(), max_y = min_y;
+    for (const auto& p : pa) {
+        cx += p.x(); cy += p.y();
+        min_x = std::min(min_x, p.x()); max_x = std::max(max_x, p.x());
+        min_y = std::min(min_y, p.y()); max_y = std::max(max_y, p.y());
+    }
     cx /= pa.size(); cy /= pa.size();
 
     int idx_1based = 0;
@@ -154,10 +158,9 @@ Slic3r::Vec2d expected_plate_center_world(const ProjectState& s,
             { idx_1based = static_cast<int>(i) + 1; break; }
     REQUIRE(idx_1based > 0);
 
-    double bw = pa[2].x() - pa[0].x();
-    double bh = pa[2].y() - pa[0].y();
     auto origin = bambu_cli::plate_world_origin(
-        idx_1based, static_cast<int>(s.plate_data.size()), bw, bh);
+        idx_1based, static_cast<int>(s.plate_data.size()),
+        max_x - min_x, max_y - min_y);
     return Slic3r::Vec2d(origin.x() + cx, origin.y() + cy);
 }
 
@@ -895,14 +898,31 @@ TEST_CASE("plate_arrange: plate-2 honors world stride",
 
     REQUIRE(bambu_cli::plate_arrange(s, "Plate-2").ok);
 
-    // Plate-2's world origin is the BBS stride from plate 1. Both
-    // arranged instances should land in plate 2's world region (X
-    // roughly > bed_width). For a Bambu X1 256x256 bed, plate 2 lives
-    // around X >= 256 * 1.2 = 307.
+    // Plate-2's world origin is the BBS stride from plate 1 (bed * 1.2).
+    // For a 256x256 Bambu X1 bed, the stride is ~307. Use a tight
+    // threshold (≥ 280) that distinguishes "stride fully added back in
+    // step 10" from "stride half-applied or forgotten". A loose
+    // threshold (e.g. > 100) would silently pass on partial bugs.
     auto bba = s.model.objects[a.first]->instance_bounding_box(a.second, false);
     auto bbb = s.model.objects[b.first]->instance_bounding_box(b.second, false);
-    REQUIRE(bba.min.x() > 200.0);
-    REQUIRE(bbb.min.x() > 200.0);
+    REQUIRE(bba.min.x() >= 280.0);
+    REQUIRE(bbb.min.x() >= 280.0);
+}
+
+TEST_CASE("plate_arrange: malformed bed_exclude_area (count not multiple of 4) "
+          "-> std::invalid_argument", "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    add_cube_at(s, "Plate-1", Slic3r::Vec3d(50, 50, 0));
+    // Inject 5 points — not divisible by 4. Pin the "stricter than GUI"
+    // divergence documented in the spec.
+    auto* opt = s.project_config.option<Slic3r::ConfigOptionPoints>(
+        "bed_exclude_area", true);
+    opt->values = {Slic3r::Vec2d(0, 0), Slic3r::Vec2d(10, 0),
+                   Slic3r::Vec2d(10, 10), Slic3r::Vec2d(0, 10),
+                   Slic3r::Vec2d(5, 5)};
+    REQUIRE_THROWS_AS(bambu_cli::plate_arrange(s, "Plate-1"),
+                      std::invalid_argument);
 }
 
 TEST_CASE("plate_arrange: too-many-objects -> PlacementFailure + state rollback",
@@ -1650,6 +1670,17 @@ std::map<std::pair<std::string,size_t>, InstSnap> snapshot(const ProjectState& s
     return out;
 }
 
+// Assert pre == post on all six fields (offset XYZ + rotation XYZ).
+void require_snap_eq(const InstSnap& pre, const InstSnap& post,
+                     double margin = 0.01) {
+    REQUIRE(post.offset.x()   == Approx(pre.offset.x()).margin(margin));
+    REQUIRE(post.offset.y()   == Approx(pre.offset.y()).margin(margin));
+    REQUIRE(post.offset.z()   == Approx(pre.offset.z()).margin(margin));
+    REQUIRE(post.rotation.x() == Approx(pre.rotation.x()).margin(margin));
+    REQUIRE(post.rotation.y() == Approx(pre.rotation.y()).margin(margin));
+    REQUIRE(post.rotation.z() == Approx(pre.rotation.z()).margin(margin));
+}
+
 } // namespace
 
 TEST_CASE("roundtrip: plate_center survives save/load",
@@ -1676,10 +1707,7 @@ TEST_CASE("roundtrip: plate_center survives save/load",
     auto post = snapshot(s2);
 
     REQUIRE(post.count({"RT_Cube", 0}) == 1);
-    REQUIRE(post[{"RT_Cube", 0}].offset.x() ==
-            Approx(pre[{"RT_Cube", 0}].offset.x()).margin(0.01));
-    REQUIRE(post[{"RT_Cube", 0}].offset.y() ==
-            Approx(pre[{"RT_Cube", 0}].offset.y()).margin(0.01));
+    require_snap_eq(pre[{"RT_Cube", 0}], post[{"RT_Cube", 0}]);
 
     fs::remove(in); fs::remove(out);
 }
@@ -1706,8 +1734,8 @@ TEST_CASE("roundtrip: plate_drop_to_bed survives save/load",
     REQUIRE(bambu_cli::load_project(out, s2).ok);
     auto post = snapshot(s2);
 
-    REQUIRE(post[{"RT_Drop", 0}].offset.z() ==
-            Approx(pre[{"RT_Drop", 0}].offset.z()).margin(0.01));
+    REQUIRE(post.count({"RT_Drop", 0}) == 1);
+    require_snap_eq(pre[{"RT_Drop", 0}], post[{"RT_Drop", 0}]);
 
     fs::remove(in); fs::remove(out);
 }
@@ -1738,8 +1766,7 @@ TEST_CASE("roundtrip: plate_arrange survives save/load",
 
     for (size_t ii = 0; ii < 2; ++ii) {
         REQUIRE(post.count({"RT_Arr", ii}) == 1);
-        REQUIRE(post[{"RT_Arr", ii}].offset.x() ==
-                Approx(pre[{"RT_Arr", ii}].offset.x()).margin(0.01));
+        require_snap_eq(pre[{"RT_Arr", ii}], post[{"RT_Arr", ii}]);
     }
     fs::remove(in); fs::remove(out);
 }
@@ -1768,8 +1795,8 @@ TEST_CASE("roundtrip: plate_auto_orient survives save/load",
     ProjectState s2;
     REQUIRE(bambu_cli::load_project(out, s2).ok);
     auto post = snapshot(s2);
-    REQUIRE(post[{"RT_Aor", 0}].offset.z() ==
-            Approx(pre[{"RT_Aor", 0}].offset.z()).margin(0.01));
+    REQUIRE(post.count({"RT_Aor", 0}) == 1);
+    require_snap_eq(pre[{"RT_Aor", 0}], post[{"RT_Aor", 0}]);
 
     fs::remove(in); fs::remove(out);
 }
@@ -1798,8 +1825,8 @@ TEST_CASE("roundtrip: object_auto_orient survives save/load",
     ProjectState s2;
     REQUIRE(bambu_cli::load_project(out, s2).ok);
     auto post = snapshot(s2);
-    REQUIRE(post[{"RT_OAO", 0}].offset.z() ==
-            Approx(pre[{"RT_OAO", 0}].offset.z()).margin(0.01));
+    REQUIRE(post.count({"RT_OAO", 0}) == 1);
+    require_snap_eq(pre[{"RT_OAO", 0}], post[{"RT_OAO", 0}]);
 
     fs::remove(in); fs::remove(out);
 }
@@ -2000,6 +2027,12 @@ Run through this list after the last commit:
   → exit 7 mapping reused for orient).
 - [ ] `libslic3r_gui` not linked (verified by inspecting
   `src/cli/CMakeLists.txt`).
+- [ ] Spec divergences pinned by tests:
+      `params.allow_rotations = true` forced (covered indirectly via the
+      two-overlap arrange test — rotation-eligible inputs can pack
+      tighter than translation-only) **and** strict
+      `bed_exclude_area` validation (covered by the malformed-count
+      test added in Task 5 step 1).
 - [ ] Manual-test sign-off boxes added but unchecked (manual GUI gate is
   user's job, not the implementer's).
 - [ ] Spec is referenced from status.md milestone entry.
