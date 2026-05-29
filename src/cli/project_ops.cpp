@@ -10,6 +10,8 @@
 #include "libslic3r/Preset.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/Orient.hpp"
+#include "libslic3r/Arrange.hpp"
+#include "libslic3r/ModelArrange.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -1305,6 +1307,95 @@ OpResult object_auto_orient(ProjectState& state,
             const auto off = inst->get_offset();
             inst->set_offset(Slic3r::Vec3d(off.x(), off.y(), off.z() - mz));
         }
+    }
+    OpResult r; r.ok = true; return r;
+}
+
+OpResult plate_arrange(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    const auto info = plate_bed_info(state, plate_name);   // throws on degenerate
+
+    // Build ArrangePolygons from instances. get_instance_arrange_poly
+    // emits translation in world coords (Model.cpp:4240).
+    Slic3r::arrangement::ArrangePolygons items;
+    items.reserve(pairs.size());
+    for (const auto& [oi, ii] : pairs) {
+        auto* inst = state.model.objects[oi]->instances[ii];
+        Slic3r::arrangement::ArrangePolygon ap =
+            Slic3r::get_instance_arrange_poly(inst, state.project_config);
+        // Normalize world-coord translation to plate-local. For plate 1
+        // this subtracts zero. For plate >= 2 it removes the BBS stride
+        // so the arrange engine sees bed-local input (otherwise the item
+        // is way outside the bed polygon at bed_idx 0).
+        ap.translation -= Slic3r::Vec2crd(
+            Slic3r::scaled<coord_t>(info.world_origin.x()),
+            Slic3r::scaled<coord_t>(info.world_origin.y()));
+        items.emplace_back(std::move(ap));
+    }
+
+    // Build excludes from bed_exclude_area (consecutive groups of 4
+    // rectangular points). Stricter than GUI: malformed counts throw,
+    // per spec divergence note.
+    Slic3r::arrangement::ArrangePolygons excludes;
+    if (const auto* exc_opt = state.project_config.option<
+            Slic3r::ConfigOptionPoints>("bed_exclude_area")) {
+        const auto& pts = exc_opt->values;
+        if (pts.size() % 4 != 0)
+            throw std::invalid_argument(
+                "arrange: bed_exclude_area malformed (point count not multiple of 4)");
+        for (size_t i = 0; i + 3 < pts.size(); i += 4) {
+            Slic3r::arrangement::ArrangePolygon e;
+            for (size_t k = 0; k < 4; ++k)
+                e.poly.contour.append(Slic3r::Point(
+                    Slic3r::scaled<coord_t>(pts[i + k].x()),
+                    Slic3r::scaled<coord_t>(pts[i + k].y())));
+            e.bed_idx       = 0;   // explicit; matches PartPlate.cpp:5815
+            e.is_virt_object = true;
+            excludes.emplace_back(std::move(e));
+        }
+    }
+
+    // Populate ArrangeParams from project config via libslic3r helpers.
+    Slic3r::arrangement::ArrangeParams params;
+    Slic3r::arrangement::update_arrange_params(params, state.project_config,
+                                               items);
+    Slic3r::arrangement::update_selected_items_inflation(items,
+        state.project_config, params);
+    // Deliberate CLI divergence from GUI slice path (BambuStudio.cpp:5351):
+    // headless batch composition benefits unconditionally from rotation.
+    params.allow_rotations = true;
+
+    // Bed points respecting bed_shrink_* (params just got populated).
+    Slic3r::Points bedpts =
+        Slic3r::arrangement::get_shrink_bedpts(state.project_config, params);
+    if (bedpts.size() < 3)
+        throw std::invalid_argument(
+            "arrange: project has no usable printable_area");
+
+    // Run the engine.
+    Slic3r::arrangement::arrange(items, excludes, bedpts, params);
+
+    // Overflow check BEFORE applying offsets — state rollback on throw.
+    int overflow = 0;
+    for (const auto& ap : items) if (ap.bed_idx != 0) ++overflow;
+    if (overflow > 0)
+        throw PlacementFailure("arrange: " + std::to_string(overflow) +
+                               " object(s) did not fit on plate '" +
+                               plate_name + "'");
+
+    // Apply: translate bed-local result back to world via plate_origin.
+    for (size_t k = 0; k < pairs.size(); ++k) {
+        const auto& [oi, ii] = pairs[k];
+        auto* inst = state.model.objects[oi]->instances[ii];
+        const auto cur = inst->get_offset();
+        inst->set_offset(Slic3r::Vec3d(
+            info.world_origin.x() + Slic3r::unscaled<double>(items[k].translation.x()),
+            info.world_origin.y() + Slic3r::unscaled<double>(items[k].translation.y()),
+            cur.z()));
+        inst->set_rotation(Slic3r::Vec3d(0, 0, items[k].rotation));
     }
     OpResult r; r.ok = true; return r;
 }

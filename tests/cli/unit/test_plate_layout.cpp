@@ -318,3 +318,112 @@ TEST_CASE("object_auto_orient: unknown name -> std::out_of_range",
     REQUIRE_THROWS_AS(bambu_cli::object_auto_orient(s, "NoSuchObject"),
                       std::out_of_range);
 }
+
+TEST_CASE("plate_arrange: two overlapping copies become non-overlapping",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto a = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(120, 120, 0));
+    auto b = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(125, 125, 0));
+
+    REQUIRE(bambu_cli::plate_arrange(s, REF_PLATE_1).ok);
+
+    auto bba = s.model.objects[a.first]->instance_bounding_box(a.second, false);
+    auto bbb = s.model.objects[b.first]->instance_bounding_box(b.second, false);
+    // XY AABBs must not intersect after arrange.
+    const bool x_overlap = bba.max.x() > bbb.min.x() && bbb.max.x() > bba.min.x();
+    const bool y_overlap = bba.max.y() > bbb.min.y() && bbb.max.y() > bba.min.y();
+    REQUIRE_FALSE((x_overlap && y_overlap));
+}
+
+TEST_CASE("plate_arrange: empty plate is success no-op",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::plate_arrange(s, REF_PLATE_1).ok);
+}
+
+TEST_CASE("plate_arrange: unknown plate -> std::out_of_range",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE_THROWS_AS(bambu_cli::plate_arrange(s, "NoSuchPlate"),
+                      std::out_of_range);
+}
+
+TEST_CASE("plate_arrange: plate-2 honors world stride",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::add_plate(s, "Plate-2").ok);
+    auto a = add_cube_at(s, "Plate-2", Slic3r::Vec3d(10, 10, 0));
+    auto b = add_cube_at(s, "Plate-2", Slic3r::Vec3d(15, 15, 0));
+
+    REQUIRE(bambu_cli::plate_arrange(s, "Plate-2").ok);
+
+    // Plate-2's world origin is the BBS stride from plate 1 (bed * 1.2).
+    // For a 256x256 Bambu X1 bed, the stride is ~307. Use a tight
+    // threshold (>= 280) that distinguishes "stride fully added back in
+    // step 10" from "stride half-applied or forgotten".
+    auto bba = s.model.objects[a.first]->instance_bounding_box(a.second, false);
+    auto bbb = s.model.objects[b.first]->instance_bounding_box(b.second, false);
+    REQUIRE(bba.min.x() >= 280.0);
+    REQUIRE(bbb.min.x() >= 280.0);
+}
+
+TEST_CASE("plate_arrange: malformed bed_exclude_area (count not multiple of 4) "
+          "-> std::invalid_argument", "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 0));
+    // Inject 5 points — not divisible by 4. Pin the "stricter than GUI"
+    // divergence documented in the spec.
+    auto* opt = s.project_config.option<Slic3r::ConfigOptionPoints>(
+        "bed_exclude_area", true);
+    opt->values = {Slic3r::Vec2d(0, 0), Slic3r::Vec2d(10, 0),
+                   Slic3r::Vec2d(10, 10), Slic3r::Vec2d(0, 10),
+                   Slic3r::Vec2d(5, 5)};
+    REQUIRE_THROWS_AS(bambu_cli::plate_arrange(s, REF_PLATE_1),
+                      std::invalid_argument);
+}
+
+TEST_CASE("plate_arrange: too-many-objects -> PlacementFailure + state rollback",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    // Add many copies of the fixture cube — enough that they can't all
+    // fit on a 256x256 Bambu X1 bed even at the minimum spacing the
+    // arrange engine permits. The fixture cube is small (~10mm); the
+    // Round-1 200 from the plan fits with room to spare. 800 was chosen
+    // empirically to reliably trip overflow with margin.
+    bambu_cli::ManualTransform tf;
+    tf.has_translate = true; tf.tx = 50; tf.ty = 50;
+    for (int i = 0; i < 800; ++i) {
+        bambu_cli::ObjectRef ref;
+        REQUIRE(bambu_cli::add_object_to_plate(
+            s, REF_PLATE_1, bambu_cli_unit::fixture_stl("cube.stl"),
+            "ArrCube", -1, &tf, 1, &ref).ok);
+    }
+
+    // Snapshot offsets before arrange.
+    std::vector<Slic3r::Vec3d> pre;
+    for (auto* obj : s.model.objects)
+        if (obj->name == "ArrCube")
+            for (auto* inst : obj->instances)
+                pre.push_back(inst->get_offset());
+
+    REQUIRE_THROWS_AS(bambu_cli::plate_arrange(s, REF_PLATE_1),
+                      bambu_cli::PlacementFailure);
+
+    // State rollback: instance offsets unchanged after the throw.
+    std::vector<Slic3r::Vec3d> post;
+    for (auto* obj : s.model.objects)
+        if (obj->name == "ArrCube")
+            for (auto* inst : obj->instances)
+                post.push_back(inst->get_offset());
+    REQUIRE(pre.size() == post.size());
+    for (size_t i = 0; i < pre.size(); ++i) {
+        REQUIRE(post[i].x() == Approx(pre[i].x()));
+        REQUIRE(post[i].y() == Approx(pre[i].y()));
+    }
+}

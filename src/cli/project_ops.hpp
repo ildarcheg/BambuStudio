@@ -234,6 +234,25 @@ OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name);
 //   exit 7 (invalid_state)     — orient engine failure (propagated)
 OpResult object_auto_orient(ProjectState& state, const std::string& object_name);
 
+// Arrange every instance on <plate_name> via arrangement::arrange()
+// with parameters pulled from state.project_config (via
+// update_arrange_params + update_selected_items_inflation +
+// get_shrink_bedpts in libslic3r/Arrange.hpp). Bed shape and excludes
+// constructed from project_config; bed_exclude_area parsed as
+// consecutive groups of 4 rectangular points.
+//
+// Translation is normalized to plate-local before arrange() (since
+// get_instance_arrange_poly returns world-coord translation per
+// Model.cpp:4240) and re-added after via plate_world_origin.
+//
+// Empty plate: success no-op.
+// Errors:
+//   exit 1 (usage_error)        — printable_area missing/degenerate, or
+//                                 bed_exclude_area point count not multiple of 4
+//   exit 6 (unknown_reference)  — plate not found
+//   exit 9 (placement_failure)  — one or more items did not fit (bed_idx != 0)
+OpResult plate_arrange(ProjectState& state, const std::string& plate_name);
+
 // ---- D2: object merge-parts -----------------------------------------------
 
 // Parameters for merge_object_parts. --parts must be non-empty (validated by
