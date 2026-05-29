@@ -11,6 +11,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_plate_add.cpp
     e2e/test_plate_list.cpp
     e2e/test_plate_remove_rename.cpp
+    e2e/test_plate_layout_commands.cpp
     e2e/test_object_add.cpp
     e2e/test_object_filament.cpp
     e2e/test_object_transforms.cpp
