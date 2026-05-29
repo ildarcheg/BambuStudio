@@ -270,3 +270,51 @@ TEST_CASE("plate_auto_orient: unknown plate -> std::out_of_range",
     REQUIRE_THROWS_AS(bambu_cli::plate_auto_orient(s, "NoSuchPlate"),
                       std::out_of_range);
 }
+
+TEST_CASE("object_auto_orient: single instance — oriented and dropped",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 30));
+    s.model.objects[oi]->instances[ii]->set_rotation(
+        Slic3r::Vec3d(M_PI * 0.2, 0, 0));
+
+    REQUIRE(bambu_cli::object_auto_orient(s, "TestCube").ok);
+
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[oi]->instance_bounding_box(ii, false);
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.01));
+}
+
+TEST_CASE("object_auto_orient: N instances across two plates — each "
+          "dropped independently", "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::add_plate(s, "Plate-2").ok);
+    auto p1 = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(40, 40, 20));
+    auto p2 = add_cube_at(s, "Plate-2", Slic3r::Vec3d(60, 60, 35));
+    const double pre_x_p1 = s.model.objects[p1.first]->instances[p1.second]
+        ->get_offset().x();
+    const double pre_x_p2 = s.model.objects[p2.first]->instances[p2.second]
+        ->get_offset().x();
+
+    REQUIRE(bambu_cli::object_auto_orient(s, "TestCube").ok);
+
+    // Both instances dropped to z=0; XY unchanged on each.
+    auto bb1 = s.model.objects[p1.first]->instance_bounding_box(p1.second, false);
+    auto bb2 = s.model.objects[p2.first]->instance_bounding_box(p2.second, false);
+    REQUIRE(bb1.min.z() == Approx(0.0).margin(0.01));
+    REQUIRE(bb2.min.z() == Approx(0.0).margin(0.01));
+    REQUIRE(s.model.objects[p1.first]->instances[p1.second]->get_offset().x()
+            == Approx(pre_x_p1));
+    REQUIRE(s.model.objects[p2.first]->instances[p2.second]->get_offset().x()
+            == Approx(pre_x_p2));
+}
+
+TEST_CASE("object_auto_orient: unknown name -> std::out_of_range",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE_THROWS_AS(bambu_cli::object_auto_orient(s, "NoSuchObject"),
+                      std::out_of_range);
+}

@@ -1285,4 +1285,28 @@ OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name) {
     return plate_drop_to_bed(state, plate_name);
 }
 
+OpResult object_auto_orient(ProjectState& state,
+                            const std::string& object_name) {
+    std::vector<int> matched_obj_idx;
+    for (size_t i = 0; i < state.model.objects.size(); ++i) {
+        if (state.model.objects[i] &&
+            state.model.objects[i]->name == object_name)
+            matched_obj_idx.push_back(static_cast<int>(i));
+    }
+    if (matched_obj_idx.empty())
+        throw std::out_of_range("object '" + object_name + "' not found");
+
+    for (int oi : matched_obj_idx) {
+        auto& obj = *state.model.objects[oi];
+        for (size_t ii = 0; ii < obj.instances.size(); ++ii) {
+            auto* inst = obj.instances[ii];
+            Slic3r::orientation::orient(inst);
+            const double mz = instance_world_min_z(obj, *inst);
+            const auto off = inst->get_offset();
+            inst->set_offset(Slic3r::Vec3d(off.x(), off.y(), off.z() - mz));
+        }
+    }
+    OpResult r; r.ok = true; return r;
+}
+
 } // namespace bambu_cli

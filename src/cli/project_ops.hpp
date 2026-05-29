@@ -225,6 +225,15 @@ OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name);
 //   exit 7 (invalid_state)     — orient engine failure (propagated)
 OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name);
 
+// Auto-orient every instance of every ModelObject whose name matches
+// <object_name> (group-by-name semantics — same as remove_object and
+// set_object_filament), then drop each instance to bed independently.
+// Per-instance operation; plate membership is irrelevant here.
+// Errors:
+//   exit 6 (unknown_reference) — no matching object found
+//   exit 7 (invalid_state)     — orient engine failure (propagated)
+OpResult object_auto_orient(ProjectState& state, const std::string& object_name);
+
 // ---- D2: object merge-parts -----------------------------------------------
 
 // Parameters for merge_object_parts. --parts must be non-empty (validated by
