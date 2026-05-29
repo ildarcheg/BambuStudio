@@ -577,3 +577,17 @@ objects** (the group matched by `--name`) receive the extruder stamp. Throws
       Build recipe: `bambu-cli object add` then `project info set`
       then `project profile set` then three `project aux add` calls
       with `--folder assembly-guide / bill-of-materials / others`.
+
+## M11 — Layout operations (2026-05-29)
+
+- [x] `plate center` (`project_ops::plate_center`)
+- [x] `plate drop-to-bed` (`project_ops::plate_drop_to_bed`, hull-based min-Z)
+- [x] `plate arrange` (`project_ops::plate_arrange`, libslic3r helpers)
+- [x] `plate auto-orient` (`project_ops::plate_auto_orient`, orient + implicit drop)
+- [x] `object auto-orient` (`project_ops::object_auto_orient`, group-by-name)
+- [x] `object add` default placement: center + Z-drop (replaces sqrt-grid)
+- [ ] Manual GUI sign-off (Steps 16–20 of `docs/cli/manual-test.md`)
+
+Spec: `docs/superpowers/specs/2026-05-29-arrange-center-drop-orient-design.md`
+Plan: `docs/superpowers/plans/2026-05-29-arrange-center-drop-orient.md`
+Notes: `docs/cli/notes/2026-05-29-drop-to-bed-hull-vs-mesh.md`

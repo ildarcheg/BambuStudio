@@ -336,6 +336,83 @@ Open `$out` in Bambu Studio:
 
 ---
 
+## Step 16: plate center -- center every instance on a plate
+
+```powershell
+& $cli plate center $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate centered: Plate 01 test`.
+
+**[BS layer-2 check]** Open `$out` in Bambu Studio. Every object on the
+plate should be at the plate centroid (stacked if multiple). Z
+unchanged.
+
+[ ] open-and-verify in Bambu Studio
+
+---
+
+## Step 17: plate drop-to-bed -- drop every instance to bed
+
+```powershell
+& $cli plate drop-to-bed $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate dropped-to-bed: Plate 01 test`. XY
+unchanged; every object sits with its lowest face on the bed.
+
+[ ] open-and-verify in Bambu Studio
+
+---
+
+## Step 18: plate arrange -- mimic the per-plate Arrange button
+
+```powershell
+& $cli plate arrange $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate arranged: Plate 01 test`. Objects
+on the plate nest without overlap, respecting `bed_exclude_area`. Other
+plates untouched. If overflow: exit 9 with
+`arrange: N object(s) did not fit on plate 'Plate 01 test'`.
+
+[ ] open-and-verify in Bambu Studio
+
+---
+
+## Step 19: plate auto-orient -- orient and drop every object on a plate
+
+```powershell
+& $cli plate auto-orient $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate auto-oriented: Plate 01 test`.
+Each object on the plate rotated to its best printing orientation and
+dropped to bed.
+
+[ ] open-and-verify in Bambu Studio
+
+---
+
+## Step 20: object auto-orient -- orient a single named object
+
+```powershell
+& $cli object auto-orient $out --name Bracket
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `object auto-oriented: Bracket`. All
+instances of "Bracket" oriented and dropped, regardless of plate
+membership.
+
+[ ] open-and-verify in Bambu Studio
+
+---
+
 ## Cleanup
 
 ```powershell
