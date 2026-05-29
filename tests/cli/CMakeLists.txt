@@ -27,6 +27,7 @@ set(BAMBU_CLI_TEST_SOURCES
     # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
+    unit/test_plate_layout.cpp
     unit/test_project_ops_objects.cpp
     unit/test_project_ops_split.cpp
     unit/test_project_ops_merge.cpp

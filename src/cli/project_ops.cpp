@@ -1117,4 +1117,115 @@ std::string merge_object_parts(ProjectState& state,
            p.into + "' in " + name + ".";
 }
 
+// ---------------------------------------------------------------------------
+// Layout operations (2026-05-29)
+// ---------------------------------------------------------------------------
+
+// Shared by plate_center, plate_drop_to_bed, plate_arrange, plate_auto_orient.
+// Sources the (obj_idx, instance_idx) pairs from PlateData::objects_and_instances,
+// which io.cpp:55-73 rebuilds at load time from loaded_id_to_loc. The
+// adjacent obj_inst_map is NOT used here — its post-load key/value
+// semantics (instance_idx, loaded_id) make it the wrong source for
+// (obj_idx, instance_idx) iteration.
+//
+// Throws std::out_of_range (exit 6) if no plate matches <plate_name>.
+// Empty vector means the plate exists but has no objects.
+static std::vector<std::pair<int,int>>
+collect_plate_instances(const ProjectState& state,
+                        const std::string& plate_name) {
+    for (size_t i = 0; i < state.plate_data.size(); ++i) {
+        const auto* pd = state.plate_data[i];
+        if (!pd) continue;
+        if (pd->plate_name != plate_name) continue;
+        std::vector<std::pair<int,int>> out;
+        out.reserve(pd->objects_and_instances.size());
+        for (const auto& p : pd->objects_and_instances)
+            out.emplace_back(p.first, p.second);
+        return out;
+    }
+    throw std::out_of_range("plate '" + plate_name + "' not found");
+}
+
+// Compute (plate_index_1based, total_plates, bed_width, bed_height) for
+// the named plate, plus the bed-local centroid (cx, cy). Used by
+// plate_center (and reusable for plate_arrange). Throws std::out_of_range
+// if the plate isn't found, std::invalid_argument if printable_area is
+// degenerate.
+struct PlateBedInfo {
+    int           index_1based;
+    int           total_plates;
+    double        bed_width;
+    double        bed_height;
+    double        local_cx;   // bed-local centroid X
+    double        local_cy;
+    Slic3r::Vec3d world_origin;
+};
+
+static PlateBedInfo plate_bed_info(const ProjectState& state,
+                                   const std::string& plate_name) {
+    int idx_1 = 0;
+    for (size_t i = 0; i < state.plate_data.size(); ++i) {
+        if (state.plate_data[i] &&
+            state.plate_data[i]->plate_name == plate_name) {
+            idx_1 = static_cast<int>(i) + 1;
+            break;
+        }
+    }
+    if (idx_1 == 0)
+        throw std::out_of_range("plate '" + plate_name + "' not found");
+
+    const auto* pa_opt =
+        state.project_config.option<Slic3r::ConfigOptionPoints>("printable_area");
+    if (!pa_opt || pa_opt->values.size() < 3)
+        throw std::invalid_argument("printable_area missing or < 3 points");
+
+    const auto& pa = pa_opt->values;
+    double cx = 0, cy = 0;
+    double min_x = pa.front().x(), max_x = min_x;
+    double min_y = pa.front().y(), max_y = min_y;
+    for (const auto& p : pa) {
+        cx += p.x(); cy += p.y();
+        min_x = std::min(min_x, p.x()); max_x = std::max(max_x, p.x());
+        min_y = std::min(min_y, p.y()); max_y = std::max(max_y, p.y());
+    }
+    cx /= static_cast<double>(pa.size());
+    cy /= static_cast<double>(pa.size());
+
+    PlateBedInfo info;
+    info.index_1based  = idx_1;
+    info.total_plates  = static_cast<int>(state.plate_data.size());
+    info.bed_width     = max_x - min_x;
+    info.bed_height    = max_y - min_y;
+    info.local_cx      = cx;
+    info.local_cy      = cy;
+    info.world_origin  = plate_world_origin(info.index_1based, info.total_plates,
+                                            info.bed_width, info.bed_height);
+    return info;
+}
+
+OpResult plate_center(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    auto info = plate_bed_info(state, plate_name);
+    const double target_x = info.world_origin.x() + info.local_cx;
+    const double target_y = info.world_origin.y() + info.local_cy;
+
+    for (const auto& [oi, ii] : pairs) {
+        auto* inst = state.model.objects[oi]->instances[ii];
+        // World-space XY centroid of the instance's mesh AABB.
+        Slic3r::BoundingBoxf3 bb =
+            state.model.objects[oi]->instance_bounding_box(ii, false);
+        const double cx_now = 0.5 * (bb.min.x() + bb.max.x());
+        const double cy_now = 0.5 * (bb.min.y() + bb.max.y());
+        const auto off = inst->get_offset();
+        inst->set_offset(Slic3r::Vec3d(
+            off.x() + (target_x - cx_now),
+            off.y() + (target_y - cy_now),
+            off.z()));
+    }
+    OpResult r; r.ok = true; return r;
+}
+
 } // namespace bambu_cli

@@ -197,6 +197,14 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name);
 Slic3r::Vec3d plate_world_origin(int plate_index_1based, int total_plates,
                                  double bed_width, double bed_height);
 
+// ---- Layout operations (2026-05-29) ---------------------------------------
+
+// Center every instance on <plate_name> to the plate-bed centroid in XY.
+// Z unchanged on each instance. Empty plate: success no-op.
+// Errors:
+//   exit 6 (unknown_reference) — plate not found
+OpResult plate_center(ProjectState& state, const std::string& plate_name);
+
 // ---- D2: object merge-parts -----------------------------------------------
 
 // Parameters for merge_object_parts. --parts must be non-empty (validated by
