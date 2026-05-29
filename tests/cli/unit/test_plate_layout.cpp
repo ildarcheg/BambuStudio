@@ -226,3 +226,47 @@ TEST_CASE("plate_drop_to_bed: empty plate is success no-op",
     bambu_cli_unit::load_reference_into(s);
     REQUIRE(bambu_cli::plate_drop_to_bed(s, REF_PLATE_1).ok);
 }
+
+TEST_CASE("plate_auto_orient: pre-rotated object ends up bed-flat",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 30));
+    auto* inst = s.model.objects[oi]->instances[ii];
+    inst->set_rotation(Slic3r::Vec3d(M_PI * 0.2, M_PI * 0.15, 0));
+
+    REQUIRE(bambu_cli::plate_auto_orient(s, REF_PLATE_1).ok);
+
+    // After auto-orient + implicit drop, world-space min-Z ~ 0.
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[oi]->instance_bounding_box(ii, false);
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.01));
+}
+
+TEST_CASE("plate_auto_orient: already-flat object stays bed-flat",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 0));
+
+    REQUIRE(bambu_cli::plate_auto_orient(s, REF_PLATE_1).ok);
+
+    Slic3r::BoundingBoxf3 bb =
+        s.model.objects[oi]->instance_bounding_box(ii, false);
+    REQUIRE(bb.min.z() == Approx(0.0).margin(0.01));
+}
+
+TEST_CASE("plate_auto_orient: empty plate is success no-op",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::plate_auto_orient(s, REF_PLATE_1).ok);
+}
+
+TEST_CASE("plate_auto_orient: unknown plate -> std::out_of_range",
+          "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE_THROWS_AS(bambu_cli::plate_auto_orient(s, "NoSuchPlate"),
+                      std::out_of_range);
+}

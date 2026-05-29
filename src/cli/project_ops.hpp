@@ -216,6 +216,15 @@ OpResult plate_center(ProjectState& state, const std::string& plate_name);
 //   exit 6 (unknown_reference) — plate not found
 OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name);
 
+// Auto-orient every instance on <plate_name> using
+// orientation::orient(ModelInstance*) (libslic3r/Orient.hpp:163), then
+// implicitly drop every instance to bed (Z translation, hull-based).
+// Empty plate: success no-op.
+// Errors:
+//   exit 6 (unknown_reference) — plate not found
+//   exit 7 (invalid_state)     — orient engine failure (propagated)
+OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name);
+
 // ---- D2: object merge-parts -----------------------------------------------
 
 // Parameters for merge_object_parts. --parts must be non-empty (validated by

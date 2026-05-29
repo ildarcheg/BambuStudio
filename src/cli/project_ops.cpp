@@ -9,6 +9,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Preset.hpp"
 #include "libslic3r/Config.hpp"
+#include "libslic3r/Orient.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -1268,6 +1269,20 @@ OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name) {
         inst->set_offset(Slic3r::Vec3d(off.x(), off.y(), off.z() - mz));
     }
     OpResult r; r.ok = true; return r;
+}
+
+OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    for (const auto& [oi, ii] : pairs) {
+        auto* inst = state.model.objects[oi]->instances[ii];
+        Slic3r::orientation::orient(inst);
+    }
+    // Implicit drop after orient — rotation typically leaves the object
+    // off the bed in Z. Per spec, auto-orient always finishes with drop.
+    return plate_drop_to_bed(state, plate_name);
 }
 
 } // namespace bambu_cli
