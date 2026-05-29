@@ -47,15 +47,20 @@ roundtrip). Link surface is deliberately narrowed via
 `.bak`-swap atomic save originated in OrcaSlicer M11 — Bambu ported it
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
-## Branch state (as of 2026-05-23)
-- `master` HEAD: `90fbbbf7e` ("docs(cli): cross-project convergence #B6").
-  Up to date with `origin/master` — already pushed.
-- `cross-project-convergence` branch retained at the same SHA.
+## Branch state (as of 2026-05-28)
+- `master` HEAD: `041fb62a6` ("test(cli): set temporary dir in test
+  harness for macOS"). Up to date with `origin/master` — already pushed.
+- `cross-project-convergence` branch retained at `90fbbbf7e` (the prior
+  convergence HEAD).
 - Convergence range: `65ecc50d9..90fbbbf7e` (Round 1: roundtrip tests,
   cover-image refcount, identify_id pin, project-init staging-copy
   TOCTOU. Round 2: `plate_world_origin` total-count fix, stubs
   investigation kept-with-rationale).
-- Last `cli_tests` run: 235 cases / 1170 assertions, green.
+- Last `cli_tests` run: 292 cases / 1424 assertions, green on macOS
+  arm64. To build/run the tests on macOS, reconfigure with
+  `-DSLIC3R_BUILD_TESTS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5` (the
+  default `BuildMac.sh` configures tests OFF); see
+  `tests/cli/cli_tests_main.cpp` for the macOS temp-dir harness fix.
 - Working tree is clean as of this CLAUDE.md write.
 
 ## File layout
