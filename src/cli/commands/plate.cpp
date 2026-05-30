@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <typeindex>
 
 namespace bambu_cli {
 
@@ -102,6 +104,93 @@ void register_plate_subcommands(CLI::App& app, OutputMode* mode_out) {
                 return s.str();
             });
     });
+
+    // --- plate center -------------------------------------------------
+    {
+        struct A { std::string in, plate, out; };
+        auto* sc = plate->add_subcommand("center",
+            "center every instance on a plate in XY (Z unchanged)");
+        auto a = std::make_shared<A>();
+        sc->add_option("in", a->in, "input .3mf")->required();
+        sc->add_option("--plate", a->plate, "target plate name")->required();
+        sc->add_option("--output", a->out, "output .3mf (defaults to in-place)");
+        sc->callback([a, mode_out]() {
+            OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                              ? OutputMode::Json : OutputMode::Text;
+            const std::string& out = a->out.empty() ? a->in : a->out;
+            run_mutation(mode, a->in, out, [&](ProjectState& s) {
+                plate_center(s, a->plate);
+                return "plate centered: " + a->plate;
+            });
+        });
+    }
+
+    // --- plate drop-to-bed --------------------------------------------
+    {
+        struct A { std::string in, plate, out; };
+        auto* sc = plate->add_subcommand("drop-to-bed",
+            "drop every instance on a plate to z=0 (XY unchanged)");
+        auto a = std::make_shared<A>();
+        sc->add_option("in", a->in, "input .3mf")->required();
+        sc->add_option("--plate", a->plate, "target plate name")->required();
+        sc->add_option("--output", a->out, "output .3mf (defaults to in-place)");
+        sc->callback([a, mode_out]() {
+            OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                              ? OutputMode::Json : OutputMode::Text;
+            const std::string& out = a->out.empty() ? a->in : a->out;
+            run_mutation(mode, a->in, out, [&](ProjectState& s) {
+                plate_drop_to_bed(s, a->plate);
+                return "plate dropped-to-bed: " + a->plate;
+            });
+        });
+    }
+
+    // --- plate arrange ------------------------------------------------
+    {
+        struct A { std::string in, plate, out; };
+        auto* sc = plate->add_subcommand("arrange",
+            "arrange objects on a plate (mimics the GUI per-plate Arrange button)");
+        auto a = std::make_shared<A>();
+        sc->add_option("in", a->in, "input .3mf")->required();
+        sc->add_option("--plate", a->plate, "target plate name")->required();
+        sc->add_option("--output", a->out, "output .3mf (defaults to in-place)");
+        sc->callback([a, mode_out]() {
+            OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                              ? OutputMode::Json : OutputMode::Text;
+            const std::string& out = a->out.empty() ? a->in : a->out;
+            // PlacementFailure (exit 9) is already mapped by run_mutation's
+            // default exception table -- no override needed here.
+            run_mutation(mode, a->in, out, [&](ProjectState& s) {
+                plate_arrange(s, a->plate);
+                return "plate arranged: " + a->plate;
+            });
+        });
+    }
+
+    // --- plate auto-orient --------------------------------------------
+    {
+        struct A { std::string in, plate, out; };
+        auto* sc = plate->add_subcommand("auto-orient",
+            "auto-orient every object on a plate and drop to bed");
+        auto a = std::make_shared<A>();
+        sc->add_option("in", a->in, "input .3mf")->required();
+        sc->add_option("--plate", a->plate, "target plate name")->required();
+        sc->add_option("--output", a->out, "output .3mf (defaults to in-place)");
+        sc->callback([a, mode_out]() {
+            OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
+                              ? OutputMode::Json : OutputMode::Text;
+            const std::string& out = a->out.empty() ? a->in : a->out;
+            // std::runtime_error from orient engine -> exit 7 (invalid_state).
+            MutationExceptionMap overrides = {
+                {std::type_index(typeid(std::runtime_error)),
+                 {7, "invalid_state"}}
+            };
+            run_mutation(mode, a->in, out, [&](ProjectState& s) {
+                plate_auto_orient(s, a->plate);
+                return "plate auto-oriented: " + a->plate;
+            }, overrides);
+        });
+    }
 }
 
 } // namespace bambu_cli

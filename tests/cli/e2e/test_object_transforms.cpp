@@ -130,9 +130,12 @@ TEST_CASE("object add --count 3 --translate stacks 3 copies", "[m6][transforms][
 //
 // Pre-hotfix (broken): N copies used a hardcoded 4-column step-grid with step=60mm
 // and no clear_instances(), causing off-by-one counts and incorrect placement.
-// Post-hotfix: N ModelObjects with sqrt-grid placement, clear_instances, and
+// Post-hotfix (M6, 2026-05-19): N distinct ModelObjects, clear_instances, and
 // scale-only off-bed AABB.
-TEST_CASE("object add --count 3: N ModelObjects, sqrt-grid, correct list rows [M6 hotfix]",
+// M11 (2026-05-29): default placement changed sqrt-grid -> center-on-plate +
+// Z-drop. This test only asserts COUNT (N ModelObjects produced), not position,
+// so it remains green under the new default.
+TEST_CASE("object add --count N: N ModelObjects, correct list rows [M6 hotfix]",
           "[m6][hotfix][regression]") {
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_option::overwrite_if_exists);

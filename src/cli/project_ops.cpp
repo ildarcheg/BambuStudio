@@ -9,6 +9,9 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Preset.hpp"
 #include "libslic3r/Config.hpp"
+#include "libslic3r/Orient.hpp"
+#include "libslic3r/Arrange.hpp"
+#include "libslic3r/ModelArrange.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -253,15 +256,6 @@ OpResult add_object_to_plate(ProjectState& state,
     double plate_bed_maxx = bed_maxx + plate_origin.x();
     double plate_bed_maxy = bed_maxy + plate_origin.y();
 
-    // Pre-compute sqrt-grid parameters (derived from total copies, not loop index).
-    // CRITICAL: grid_cols must come from N (batch size), not from i+1.
-    const double auto_margin  = 10.0;
-    const double default_cell = 20.0;
-    const double cell_x = std::max(bbox.size().x() + auto_margin, default_cell);
-    const double cell_y = std::max(bbox.size().y() + auto_margin, default_cell);
-    const int grid_cols = static_cast<int>(
-        std::ceil(std::sqrt(static_cast<double>(copies))));
-
     // Stacking transform (manual mode).
     static const double DEG2RAD = 0.01745329251994329577;
     Slic3r::Vec3d stack_offset = Slic3r::Vec3d::Zero();
@@ -312,16 +306,16 @@ OpResult add_object_to_plate(ProjectState& state,
             inst_k->set_rotation(stack_rot);
             inst_k->set_scaling_factor(stack_scale);
         } else {
-            // Auto-grid mode: sqrt-grid layout, cols derived from total copies.
-            int col = k % grid_cols;
-            int row = k / grid_cols;
+            // Default placement (2026-05-29): center on plate XY + drop Z.
+            // Replaces the prior sqrt-grid layout. All N copies share the same
+            // offset (stacked at the bed centroid). Users who want spread-out
+            // copies invoke `plate arrange` afterwards.
+            const double plate_center_x = 0.5 * (plate_bed_minx + plate_bed_maxx);
+            const double plate_center_y = 0.5 * (plate_bed_miny + plate_bed_maxy);
             Slic3r::Vec3d offset(
-                plate_bed_minx + auto_margin + col * cell_x
-                    + bbox.size().x() * 0.5 - bbox.center().x(),
-                plate_bed_miny + auto_margin + row * cell_y
-                    + bbox.size().y() * 0.5 - bbox.center().y(),
-                -bbox.min.z()   // place object base on bed
-            );
+                plate_center_x - bbox.center().x(),
+                plate_center_y - bbox.center().y(),
+                -bbox.min.z());
             inst_k->set_offset(offset);
             inst_k->set_rotation(Slic3r::Vec3d::Zero());
             inst_k->set_scaling_factor(Slic3r::Vec3d(1, 1, 1));
@@ -1115,6 +1109,286 @@ std::string merge_object_parts(ProjectState& state,
 
     return "merge-parts: " + std::to_string(S) + " parts -> '" +
            p.into + "' in " + name + ".";
+}
+
+// ---------------------------------------------------------------------------
+// Layout operations (2026-05-29)
+// ---------------------------------------------------------------------------
+
+// Shared by plate_center, plate_drop_to_bed, plate_arrange, plate_auto_orient.
+// Sources the (obj_idx, instance_idx) pairs from PlateData::objects_and_instances,
+// which io.cpp:55-73 rebuilds at load time from loaded_id_to_loc. The
+// adjacent obj_inst_map is NOT used here — its post-load key/value
+// semantics (instance_idx, loaded_id) make it the wrong source for
+// (obj_idx, instance_idx) iteration.
+//
+// Throws std::out_of_range (exit 6) if no plate matches <plate_name>.
+// Empty vector means the plate exists but has no objects.
+static std::vector<std::pair<int,int>>
+collect_plate_instances(const ProjectState& state,
+                        const std::string& plate_name) {
+    for (size_t i = 0; i < state.plate_data.size(); ++i) {
+        const auto* pd = state.plate_data[i];
+        if (!pd) continue;
+        if (pd->plate_name != plate_name) continue;
+        std::vector<std::pair<int,int>> out;
+        out.reserve(pd->objects_and_instances.size());
+        for (const auto& p : pd->objects_and_instances)
+            out.emplace_back(p.first, p.second);
+        return out;
+    }
+    throw std::out_of_range("plate '" + plate_name + "' not found");
+}
+
+// Compute (plate_index_1based, total_plates, bed_width, bed_height) for
+// the named plate, plus the bed-local centroid (cx, cy). Used by
+// plate_center (and reusable for plate_arrange). Throws std::out_of_range
+// if the plate isn't found, std::invalid_argument if printable_area is
+// degenerate.
+struct PlateBedInfo {
+    int           index_1based;
+    int           total_plates;
+    double        bed_width;
+    double        bed_height;
+    double        local_cx;   // bed-local centroid X
+    double        local_cy;
+    Slic3r::Vec3d world_origin;
+};
+
+static PlateBedInfo plate_bed_info(const ProjectState& state,
+                                   const std::string& plate_name) {
+    int idx_1 = 0;
+    for (size_t i = 0; i < state.plate_data.size(); ++i) {
+        if (state.plate_data[i] &&
+            state.plate_data[i]->plate_name == plate_name) {
+            idx_1 = static_cast<int>(i) + 1;
+            break;
+        }
+    }
+    if (idx_1 == 0)
+        throw std::out_of_range("plate '" + plate_name + "' not found");
+
+    const auto* pa_opt =
+        state.project_config.option<Slic3r::ConfigOptionPoints>("printable_area");
+    if (!pa_opt || pa_opt->values.size() < 3)
+        throw std::invalid_argument("printable_area missing or < 3 points");
+
+    const auto& pa = pa_opt->values;
+    double cx = 0, cy = 0;
+    double min_x = pa.front().x(), max_x = min_x;
+    double min_y = pa.front().y(), max_y = min_y;
+    for (const auto& p : pa) {
+        cx += p.x(); cy += p.y();
+        min_x = std::min(min_x, p.x()); max_x = std::max(max_x, p.x());
+        min_y = std::min(min_y, p.y()); max_y = std::max(max_y, p.y());
+    }
+    cx /= static_cast<double>(pa.size());
+    cy /= static_cast<double>(pa.size());
+
+    PlateBedInfo info;
+    info.index_1based  = idx_1;
+    info.total_plates  = static_cast<int>(state.plate_data.size());
+    info.bed_width     = max_x - min_x;
+    info.bed_height    = max_y - min_y;
+    info.local_cx      = cx;
+    info.local_cy      = cy;
+    info.world_origin  = plate_world_origin(info.index_1based, info.total_plates,
+                                            info.bed_width, info.bed_height);
+    return info;
+}
+
+OpResult plate_center(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    auto info = plate_bed_info(state, plate_name);
+    const double target_x = info.world_origin.x() + info.local_cx;
+    const double target_y = info.world_origin.y() + info.local_cy;
+
+    for (const auto& [oi, ii] : pairs) {
+        auto* inst = state.model.objects[oi]->instances[ii];
+        // World-space XY centroid of the instance's mesh AABB.
+        Slic3r::BoundingBoxf3 bb =
+            state.model.objects[oi]->instance_bounding_box(ii, false);
+        const double cx_now = 0.5 * (bb.min.x() + bb.max.x());
+        const double cy_now = 0.5 * (bb.min.y() + bb.max.y());
+        const auto off = inst->get_offset();
+        inst->set_offset(Slic3r::Vec3d(
+            off.x() + (target_x - cx_now),
+            off.y() + (target_y - cy_now),
+            off.z()));
+    }
+    OpResult r; r.ok = true; return r;
+}
+
+// World-space min-Z across all volumes of a single instance, using each
+// volume's convex hull (typically 10-100 verts) rather than the full mesh
+// (up to ~100K verts). Mathematically equivalent — the lowest-Z vertex
+// is always extreme and therefore on the hull — but materially faster
+// for batch composition with many instances.
+//
+// Composes instance × volume transforms (matches GUI's
+// GLVolume::world_matrix at slic3r/GUI/Gizmos/GizmoObjectManipulation.cpp:38).
+// Missing the volume transform mis-drops multi-volume objects loaded
+// from a multi-part 3MF.
+static double instance_world_min_z(const Slic3r::ModelObject& obj,
+                                   const Slic3r::ModelInstance& inst) {
+    const Slic3r::Transform3d inst_m = inst.get_transformation().get_matrix();
+    double min_z = std::numeric_limits<double>::max();
+    for (const auto* mv : obj.volumes) {
+        if (!mv) continue;
+        const Slic3r::Transform3d world_m =
+            inst_m * mv->get_transformation().get_matrix();
+        const Slic3r::TriangleMesh& hull = mv->get_convex_hull();
+        for (const auto& v : hull.its.vertices) {
+            const Slic3r::Vec3d w = world_m * v.cast<double>();
+            if (w.z() < min_z) min_z = w.z();
+        }
+    }
+    return (min_z == std::numeric_limits<double>::max()) ? 0.0 : min_z;
+}
+
+OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    for (const auto& [oi, ii] : pairs) {
+        const auto& obj = *state.model.objects[oi];
+        auto* inst = state.model.objects[oi]->instances[ii];
+        const double mz = instance_world_min_z(obj, *inst);
+        const auto off = inst->get_offset();
+        inst->set_offset(Slic3r::Vec3d(off.x(), off.y(), off.z() - mz));
+    }
+    OpResult r; r.ok = true; return r;
+}
+
+OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    for (const auto& [oi, ii] : pairs) {
+        auto* inst = state.model.objects[oi]->instances[ii];
+        Slic3r::orientation::orient(inst);
+    }
+    // Implicit drop after orient — rotation typically leaves the object
+    // off the bed in Z. Per spec, auto-orient always finishes with drop.
+    return plate_drop_to_bed(state, plate_name);
+}
+
+OpResult object_auto_orient(ProjectState& state,
+                            const std::string& object_name) {
+    std::vector<int> matched_obj_idx;
+    for (size_t i = 0; i < state.model.objects.size(); ++i) {
+        if (state.model.objects[i] &&
+            state.model.objects[i]->name == object_name)
+            matched_obj_idx.push_back(static_cast<int>(i));
+    }
+    if (matched_obj_idx.empty())
+        throw std::out_of_range("object '" + object_name + "' not found");
+
+    for (int oi : matched_obj_idx) {
+        auto& obj = *state.model.objects[oi];
+        for (size_t ii = 0; ii < obj.instances.size(); ++ii) {
+            auto* inst = obj.instances[ii];
+            Slic3r::orientation::orient(inst);
+            const double mz = instance_world_min_z(obj, *inst);
+            const auto off = inst->get_offset();
+            inst->set_offset(Slic3r::Vec3d(off.x(), off.y(), off.z() - mz));
+        }
+    }
+    OpResult r; r.ok = true; return r;
+}
+
+OpResult plate_arrange(ProjectState& state, const std::string& plate_name) {
+    auto pairs = collect_plate_instances(state, plate_name);
+    if (pairs.empty()) {
+        OpResult r; r.ok = true; return r;
+    }
+    const auto info = plate_bed_info(state, plate_name);   // throws on degenerate
+
+    // Build ArrangePolygons from instances. get_instance_arrange_poly
+    // emits translation in world coords (Model.cpp:4240).
+    Slic3r::arrangement::ArrangePolygons items;
+    items.reserve(pairs.size());
+    for (const auto& [oi, ii] : pairs) {
+        auto* inst = state.model.objects[oi]->instances[ii];
+        Slic3r::arrangement::ArrangePolygon ap =
+            Slic3r::get_instance_arrange_poly(inst, state.project_config);
+        // Normalize world-coord translation to plate-local. For plate 1
+        // this subtracts zero. For plate >= 2 it removes the BBS stride
+        // so the arrange engine sees bed-local input (otherwise the item
+        // is way outside the bed polygon at bed_idx 0).
+        ap.translation -= Slic3r::Vec2crd(
+            Slic3r::scaled<coord_t>(info.world_origin.x()),
+            Slic3r::scaled<coord_t>(info.world_origin.y()));
+        items.emplace_back(std::move(ap));
+    }
+
+    // Build excludes from bed_exclude_area (consecutive groups of 4
+    // rectangular points). Stricter than GUI: malformed counts throw,
+    // per spec divergence note.
+    Slic3r::arrangement::ArrangePolygons excludes;
+    if (const auto* exc_opt = state.project_config.option<
+            Slic3r::ConfigOptionPoints>("bed_exclude_area")) {
+        const auto& pts = exc_opt->values;
+        if (pts.size() % 4 != 0)
+            throw std::invalid_argument(
+                "arrange: bed_exclude_area malformed (point count not multiple of 4)");
+        for (size_t i = 0; i + 3 < pts.size(); i += 4) {
+            Slic3r::arrangement::ArrangePolygon e;
+            for (size_t k = 0; k < 4; ++k)
+                e.poly.contour.append(Slic3r::Point(
+                    Slic3r::scaled<coord_t>(pts[i + k].x()),
+                    Slic3r::scaled<coord_t>(pts[i + k].y())));
+            e.bed_idx       = 0;   // explicit; matches PartPlate.cpp:5815
+            e.is_virt_object = true;
+            excludes.emplace_back(std::move(e));
+        }
+    }
+
+    // Populate ArrangeParams from project config via libslic3r helpers.
+    Slic3r::arrangement::ArrangeParams params;
+    Slic3r::arrangement::update_arrange_params(params, state.project_config,
+                                               items);
+    Slic3r::arrangement::update_selected_items_inflation(items,
+        state.project_config, params);
+    // Deliberate CLI divergence from GUI slice path (BambuStudio.cpp:5351):
+    // headless batch composition benefits unconditionally from rotation.
+    params.allow_rotations = true;
+
+    // Bed points respecting bed_shrink_* (params just got populated).
+    Slic3r::Points bedpts =
+        Slic3r::arrangement::get_shrink_bedpts(state.project_config, params);
+    if (bedpts.size() < 3)
+        throw std::invalid_argument(
+            "arrange: project has no usable printable_area");
+
+    // Run the engine.
+    Slic3r::arrangement::arrange(items, excludes, bedpts, params);
+
+    // Overflow check BEFORE applying offsets — state rollback on throw.
+    int overflow = 0;
+    for (const auto& ap : items) if (ap.bed_idx != 0) ++overflow;
+    if (overflow > 0)
+        throw PlacementFailure("arrange: " + std::to_string(overflow) +
+                               " object(s) did not fit on plate '" +
+                               plate_name + "'");
+
+    // Apply: translate bed-local result back to world via plate_origin.
+    for (size_t k = 0; k < pairs.size(); ++k) {
+        const auto& [oi, ii] = pairs[k];
+        auto* inst = state.model.objects[oi]->instances[ii];
+        const auto cur = inst->get_offset();
+        inst->set_offset(Slic3r::Vec3d(
+            info.world_origin.x() + Slic3r::unscaled<double>(items[k].translation.x()),
+            info.world_origin.y() + Slic3r::unscaled<double>(items[k].translation.y()),
+            cur.z()));
+        inst->set_rotation(Slic3r::Vec3d(0, 0, items[k].rotation));
+    }
+    OpResult r; r.ok = true; return r;
 }
 
 } // namespace bambu_cli

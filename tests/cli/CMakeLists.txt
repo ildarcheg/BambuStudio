@@ -11,12 +11,14 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_plate_add.cpp
     e2e/test_plate_list.cpp
     e2e/test_plate_remove_rename.cpp
+    e2e/test_plate_layout_commands.cpp
     e2e/test_object_add.cpp
     e2e/test_object_filament.cpp
     e2e/test_object_transforms.cpp
     e2e/test_object_remove_set_filament.cpp
     e2e/test_object_split.cpp
     e2e/test_object_merge.cpp
+    e2e/test_object_auto_orient.cpp
     e2e/test_config.cpp
     e2e/test_json_and_exit_codes.cpp
     e2e/test_project_info.cpp
@@ -27,6 +29,7 @@ set(BAMBU_CLI_TEST_SOURCES
     # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
+    unit/test_plate_layout.cpp
     unit/test_project_ops_objects.cpp
     unit/test_project_ops_split.cpp
     unit/test_project_ops_merge.cpp
@@ -48,6 +51,7 @@ set(BAMBU_CLI_TEST_SOURCES
     # (2026-05-22).
     roundtrip/test_project_init.cpp
     roundtrip/test_plate.cpp
+    roundtrip/test_plate_layout.cpp
     roundtrip/test_save_atomic.cpp
     roundtrip/test_output_flag.cpp
     roundtrip/test_split.cpp

@@ -197,6 +197,62 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name);
 Slic3r::Vec3d plate_world_origin(int plate_index_1based, int total_plates,
                                  double bed_width, double bed_height);
 
+// ---- Layout operations (2026-05-29) ---------------------------------------
+
+// Center every instance on <plate_name> to the plate-bed centroid in XY.
+// Z unchanged on each instance. Empty plate: success no-op.
+// Errors:
+//   exit 6 (unknown_reference) — plate not found
+OpResult plate_center(ProjectState& state, const std::string& plate_name);
+
+// Drop every instance on <plate_name> so its world-space mesh min-Z equals 0.
+// XY unchanged on each instance. Computes per-volume world matrix
+// (instance × volume) and iterates the volume's convex hull only, NOT
+// the full mesh — same algorithm as the GUI's
+// GLVolume::world_matrix() + ModelVolume::get_convex_hull() at
+// slic3r/GUI/Gizmos/GizmoObjectManipulation.cpp:36-50. Empty plate:
+// success no-op.
+// Errors:
+//   exit 6 (unknown_reference) — plate not found
+OpResult plate_drop_to_bed(ProjectState& state, const std::string& plate_name);
+
+// Auto-orient every instance on <plate_name> using
+// orientation::orient(ModelInstance*) (libslic3r/Orient.hpp:163), then
+// implicitly drop every instance to bed (Z translation, hull-based).
+// Empty plate: success no-op.
+// Errors:
+//   exit 6 (unknown_reference) — plate not found
+//   exit 7 (invalid_state)     — orient engine failure (propagated)
+OpResult plate_auto_orient(ProjectState& state, const std::string& plate_name);
+
+// Auto-orient every instance of every ModelObject whose name matches
+// <object_name> (group-by-name semantics — same as remove_object and
+// set_object_filament), then drop each instance to bed independently.
+// Per-instance operation; plate membership is irrelevant here.
+// Errors:
+//   exit 6 (unknown_reference) — no matching object found
+//   exit 7 (invalid_state)     — orient engine failure (propagated)
+OpResult object_auto_orient(ProjectState& state, const std::string& object_name);
+
+// Arrange every instance on <plate_name> via arrangement::arrange()
+// with parameters pulled from state.project_config (via
+// update_arrange_params + update_selected_items_inflation +
+// get_shrink_bedpts in libslic3r/Arrange.hpp). Bed shape and excludes
+// constructed from project_config; bed_exclude_area parsed as
+// consecutive groups of 4 rectangular points.
+//
+// Translation is normalized to plate-local before arrange() (since
+// get_instance_arrange_poly returns world-coord translation per
+// Model.cpp:4240) and re-added after via plate_world_origin.
+//
+// Empty plate: success no-op.
+// Errors:
+//   exit 1 (usage_error)        — printable_area missing/degenerate, or
+//                                 bed_exclude_area point count not multiple of 4
+//   exit 6 (unknown_reference)  — plate not found
+//   exit 9 (placement_failure)  — one or more items did not fit (bed_idx != 0)
+OpResult plate_arrange(ProjectState& state, const std::string& plate_name);
+
 // ---- D2: object merge-parts -----------------------------------------------
 
 // Parameters for merge_object_parts. --parts must be non-empty (validated by
