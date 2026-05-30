@@ -586,7 +586,7 @@ objects** (the group matched by `--name`) receive the extruder stamp. Throws
 - [x] `plate auto-orient` (`project_ops::plate_auto_orient`, orient + implicit drop)
 - [x] `object auto-orient` (`project_ops::object_auto_orient`, group-by-name)
 - [x] `object add` default placement: center + Z-drop (replaces sqrt-grid)
-- [ ] Manual GUI sign-off (Steps 16–20 of `docs/cli/manual-test.md`)
+- [x] Manual GUI sign-off (Steps 16–20 of `docs/cli/manual-test.md`) — 2026-05-30, six smoke artifacts verified in Bambu Studio (one per verb plus the `object add` default-placement change)
 
 Spec: `docs/superpowers/specs/2026-05-29-arrange-center-drop-orient-design.md`
 Plan: `docs/superpowers/plans/2026-05-29-arrange-center-drop-orient.md`

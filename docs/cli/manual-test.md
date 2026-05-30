@@ -349,7 +349,7 @@ Write-Host "exit: $LASTEXITCODE"
 plate should be at the plate centroid (stacked if multiple). Z
 unchanged.
 
-[ ] open-and-verify in Bambu Studio
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
 
 ---
 
@@ -363,7 +363,7 @@ Write-Host "exit: $LASTEXITCODE"
 **Expected:** exit 0. Stdout: `plate dropped-to-bed: Plate 01 test`. XY
 unchanged; every object sits with its lowest face on the bed.
 
-[ ] open-and-verify in Bambu Studio
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
 
 ---
 
@@ -379,7 +379,7 @@ on the plate nest without overlap, respecting `bed_exclude_area`. Other
 plates untouched. If overflow: exit 9 with
 `arrange: N object(s) did not fit on plate 'Plate 01 test'`.
 
-[ ] open-and-verify in Bambu Studio
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
 
 ---
 
@@ -394,7 +394,7 @@ Write-Host "exit: $LASTEXITCODE"
 Each object on the plate rotated to its best printing orientation and
 dropped to bed.
 
-[ ] open-and-verify in Bambu Studio
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
 
 ---
 
@@ -409,7 +409,7 @@ Write-Host "exit: $LASTEXITCODE"
 instances of "Bracket" oriented and dropped, regardless of plate
 membership.
 
-[ ] open-and-verify in Bambu Studio
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
 
 ---
 
