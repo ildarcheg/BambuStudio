@@ -18,12 +18,18 @@ void emit_ok(OutputMode mode, const std::string& code, const std::string& messag
     }
 }
 
-void emit_error(OutputMode mode, const std::string& code, const std::string& message) {
+void emit_error(OutputMode mode, const std::string& code, const std::string& message,
+                const nlohmann::json& data) {
     if (mode == OutputMode::Json) {
         nlohmann::json envelope;
         envelope["status"]  = "error";
         envelope["code"]    = code;
         envelope["message"] = message;
+        if (!data.is_null() && data.is_object()) {
+            for (auto it = data.begin(); it != data.end(); ++it) {
+                envelope[it.key()] = it.value();
+            }
+        }
         std::cerr << envelope.dump() << std::endl;
     } else {
         std::cerr << code << ": " << message << std::endl;

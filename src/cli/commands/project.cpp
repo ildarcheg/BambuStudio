@@ -14,6 +14,9 @@
 
 namespace bambu_cli {
 
+// Forward declaration — defined in commands/project_apply.cpp.
+void register_project_apply_subcommand(CLI::App* project_cmd, OutputMode* mode_out);
+
 struct ProjectInitArgs {
     std::string out_path;
     std::string template_path;
@@ -32,6 +35,9 @@ void register_project_subcommands(CLI::App& app, OutputMode* mode_out) {
 
     // Register info / profile / aux leaf verbs.
     register_project_tab_subcommands(project, mode_out);
+
+    // Register the batch-manifest apply verb.
+    register_project_apply_subcommand(project, mode_out);
 
     init->callback([args, mode_out]() {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json) ? OutputMode::Json : OutputMode::Text;

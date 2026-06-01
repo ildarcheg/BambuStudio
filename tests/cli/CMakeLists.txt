@@ -26,6 +26,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_project_profile.cpp
     e2e/test_project_aux.cpp
     e2e/test_thumbnail_passthrough.cpp
+    e2e/test_project_apply.cpp
     # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
@@ -46,6 +47,9 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_cover_real_images.cpp
     unit/test_invariant_aux_passthrough.cpp
     unit/test_invariant_cover_references.cpp
+    unit/test_apply_helpers.cpp
+    unit/test_apply_manifest.cpp
+    unit/test_project_apply_handlers.cpp
     # Roundtrip tests: in-process load -> mutate -> save -> reload cycles.
     # Ported from OrcaSlicer tests/cli/roundtrip/ as cross-project convergence
     # (2026-05-22).
@@ -59,6 +63,7 @@ set(BAMBU_CLI_TEST_SOURCES
     roundtrip/test_project_tab.cpp
     roundtrip/test_reference_3mf_passthrough.cpp
     roundtrip/test_non_ascii_metadata.cpp
+    roundtrip/test_apply_roundtrip.cpp
 )
 
 # cli_tests links the bambu_cli_core static library (defined in src/cli/

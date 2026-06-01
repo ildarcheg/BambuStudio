@@ -91,4 +91,17 @@ public:
     using DuplicateNameError::DuplicateNameError;
 };
 
+
+// Manifest schema-shape error: unknown field, missing required field,
+// type mismatch, unknown op. Thrown by `require_only`, by every handler's
+// field-validation code, and by `HandlerRegistry::lookup` on unknown op.
+// -> exit 1 (usage_error), short-circuited in exception_dispatch::dispatch
+//    BEFORE the per-op MutationExceptionMap lookup so verbs that remap
+//    std::invalid_argument -> exit 7 (split-to-parts, merge-parts) don't
+//    swallow schema typos as invalid_state.
+class ManifestFieldError : public std::invalid_argument {
+public:
+    using std::invalid_argument::invalid_argument;
+};
+
 } // namespace bambu_cli

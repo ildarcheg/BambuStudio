@@ -30,6 +30,8 @@ set(BAMBU_CLI_CORE_SOURCES
     # structural divergence from Orca (Orca has no LogSink in libslic3r).
     stubs_for_libslic3r.cpp
     nanosvg_impl.cpp
+    exception_dispatch.cpp
+    apply_helpers.cpp
     io.cpp
     invariant_guard.cpp
     json_output.cpp
@@ -37,6 +39,7 @@ set(BAMBU_CLI_CORE_SOURCES
     project_tab_ops.cpp
     png_placeholder.cpp
     commands/project.cpp
+    commands/project_apply.cpp
     commands/project_tab.cpp
     commands/inspect.cpp
     commands/plate.cpp
