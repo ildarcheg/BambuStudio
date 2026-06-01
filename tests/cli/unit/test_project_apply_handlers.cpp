@@ -176,3 +176,31 @@ TEST_CASE("plate.center: unknown field throws",
     json step = {{"op","plate.center"}, {"plate","X"}, {"junk",1}};
     REQUIRE_THROWS_AS(reg.lookup("plate.center").fn(s, step), ManifestFieldError);
 }
+
+// ---------- plate.drop-to-bed tests ----------
+
+TEST_CASE("plate.drop-to-bed: happy path drops instances",
+          "[project_apply][plate.drop-to-bed]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    reg.lookup("plate.drop-to-bed").fn(
+        s, json{{"op","plate.drop-to-bed"}, {"plate", "Plate 01 test"}});
+    SUCCEED("plate.drop-to-bed applied without throwing");
+}
+
+TEST_CASE("plate.drop-to-bed: missing plate field throws",
+          "[project_apply][plate.drop-to-bed]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("plate.drop-to-bed").fn(s, json{{"op","plate.drop-to-bed"}}),
+                      ManifestFieldError);
+}
+
+TEST_CASE("plate.drop-to-bed: unknown field throws",
+          "[project_apply][plate.drop-to-bed]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    json step = {{"op","plate.drop-to-bed"}, {"plate","X"}, {"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("plate.drop-to-bed").fn(s, step), ManifestFieldError);
+}

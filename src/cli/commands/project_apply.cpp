@@ -114,6 +114,13 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("plate.center: missing or non-string 'plate'");
         plate_center(s, step["plate"].get<std::string>());
     };
+
+    m_handlers["plate.drop-to-bed"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "plate"});
+        if (!step.contains("plate") || !step["plate"].is_string())
+            throw ManifestFieldError("plate.drop-to-bed: missing or non-string 'plate'");
+        plate_drop_to_bed(s, step["plate"].get<std::string>());
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
