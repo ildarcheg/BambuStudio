@@ -184,6 +184,13 @@ HandlerRegistry::HandlerRegistry()
                             count,
                             nullptr);
     };
+
+    m_handlers["object.remove"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name"});
+        if (!step.contains("name") || !step["name"].is_string())
+            throw ManifestFieldError("object.remove: missing or non-string 'name'");
+        remove_object(s, step["name"].get<std::string>());
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const

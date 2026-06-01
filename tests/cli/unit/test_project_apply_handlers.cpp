@@ -332,3 +332,43 @@ TEST_CASE("object.add: applies translate from object form",
     // project_ops layer; here we only assert the handler wired the
     // transform through without throwing.
 }
+
+// ---------- object.remove tests ----------
+
+TEST_CASE("object.remove: happy path removes all clones",
+          "[project_apply][object.remove]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    // The reference fixture has no pre-existing objects in obj_inst_map after
+    // load-only; add one via object.add handler so list_objects can find it.
+    HandlerRegistry reg;
+    json add_step = {
+        {"op", "object.add"},
+        {"plate", "Plate 01 test"},
+        {"stl",   bambu_cli_unit::fixture_stl("cube.stl")},
+        {"name",  "remove_target"},
+    };
+    REQUIRE_NOTHROW(reg.lookup("object.add").fn(s, add_step));
+    auto objs = bambu_cli::list_objects(s, "");
+    REQUIRE_FALSE(objs.empty());
+    std::string target = objs.front().object_name;
+    reg.lookup("object.remove").fn(s, json{{"op","object.remove"},{"name",target}});
+    auto after = bambu_cli::list_objects(s, "");
+    for (const auto& o : after) REQUIRE(o.object_name != target);
+}
+
+TEST_CASE("object.remove: missing name throws",
+          "[project_apply][object.remove]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("object.remove").fn(s, json{{"op","object.remove"}}),
+                      ManifestFieldError);
+}
+
+TEST_CASE("object.remove: unknown field throws",
+          "[project_apply][object.remove]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.remove"},{"name","X"},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("object.remove").fn(s, step), ManifestFieldError);
+}
