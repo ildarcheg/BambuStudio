@@ -19,7 +19,13 @@ monkey-patching, no `#ifdef`s, only an `add_subdirectory(cli)` hook in
 (rels target resolution / per-plate thumbnails / vector-config
 roundtrip). Link surface is deliberately narrowed via
 `src/cli/stubs_for_libslic3r.cpp` no-opping `Slic3r::Http`,
-`BBL_Encrypt`, and `LogSink` (see "divergences" below).
+`BBL_Encrypt`, and `LogSink` (see "divergences" below). Layout ops
+(`plate center` / `drop-to-bed` / `arrange` / `auto-orient` and
+`object auto-orient`, M11) reuse libslic3r's own
+`arrangement::arrange` + `update_arrange_params` +
+`update_selected_items_inflation` + `get_shrink_bedpts`
+(`src/libslic3r/Arrange.hpp`) and `orientation::orient`
+(`src/libslic3r/Orient.hpp`); no new `libslic3r_gui` link surface.
 
 ## Sibling-fork divergences — LEGITIMATE, do not try to "fix"
 - **Profile storage:** Bambu reads `model.profile_info` directly via
@@ -47,17 +53,19 @@ roundtrip). Link surface is deliberately narrowed via
 `.bak`-swap atomic save originated in OrcaSlicer M11 — Bambu ported it
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
-## Branch state (as of 2026-05-28)
-- `master` HEAD: `041fb62a6` ("test(cli): set temporary dir in test
-  harness for macOS"). Up to date with `origin/master` — already pushed.
+## Branch state (as of 2026-05-31)
+- `master` HEAD: `562fdd5ab` (merge of `worktree-cli-layout-ops-m11`
+  into master — M11 layout ops). Up to date with `origin/master` —
+  already pushed (0/0 ahead/behind).
 - `cross-project-convergence` branch retained at `90fbbbf7e` (the prior
   convergence HEAD).
 - Convergence range: `65ecc50d9..90fbbbf7e` (Round 1: roundtrip tests,
   cover-image refcount, identify_id pin, project-init staging-copy
   TOCTOU. Round 2: `plate_world_origin` total-count fix, stubs
   investigation kept-with-rationale).
-- Last `cli_tests` run: 292 cases / 1424 assertions, green on macOS
-  arm64. To build/run the tests on macOS, reconfigure with
+- Last `cli_tests` run: 331 cases / 4032 assertions, all green
+  (post-M11, includes the new layout-ops roundtrip coverage). To
+  build/run the tests on macOS, reconfigure with
   `-DSLIC3R_BUILD_TESTS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5` (the
   default `BuildMac.sh` configures tests OFF); see
   `tests/cli/cli_tests_main.cpp` for the macOS temp-dir harness fix.
