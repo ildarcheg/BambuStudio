@@ -39,6 +39,7 @@ set(BAMBU_CLI_CORE_SOURCES
     project_tab_ops.cpp
     png_placeholder.cpp
     commands/project.cpp
+    commands/project_apply.cpp
     commands/project_tab.cpp
     commands/inspect.cpp
     commands/plate.cpp

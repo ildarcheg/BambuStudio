@@ -47,6 +47,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_invariant_aux_passthrough.cpp
     unit/test_invariant_cover_references.cpp
     unit/test_apply_helpers.cpp
+    unit/test_apply_manifest.cpp
     # Roundtrip tests: in-process load -> mutate -> save -> reload cycles.
     # Ported from OrcaSlicer tests/cli/roundtrip/ as cross-project convergence
     # (2026-05-22).
