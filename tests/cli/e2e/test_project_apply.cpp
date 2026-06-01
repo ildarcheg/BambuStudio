@@ -155,3 +155,126 @@ TEST_CASE("project apply: unknown op in manifest yields exit 1",
     fs::remove(in);
     fs::remove_all(mfdir);
 }
+
+// ============================================================
+// Task 26: schema-vs-semantic exit-7 E2E tests
+//
+// For each exit-7 verb, a ManifestFieldError (schema typo) must route to
+// exit 1 (usage_error), NOT exit 7.  The per-op invalid_argument /
+// runtime_error override fires ONLY for genuine semantic failures.
+// ============================================================
+
+TEST_CASE("project apply: split-to-parts unknown field -> exit 1",
+          "[project_apply][e2e][exit7]") {
+    const std::string in    = fresh_temp_path("_apply_split_typo.3mf");
+    const std::string mfdir = fresh_temp_path("_apply_split_typo_d");
+    fs::create_directories(mfdir);
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+    std::string mf = write_manifest(mfdir,
+        R"({"version":1,"operations":[{"op":"object.split-to-parts","name":"AnyName","junk":1}]})");
+    auto r = spawn_cli({"project", "apply", in, "--manifest", mf});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);   // ManifestFieldError -> exit 1, NOT exit 7
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
+
+TEST_CASE("project apply: merge-parts unknown field -> exit 1",
+          "[project_apply][e2e][exit7]") {
+    const std::string in    = fresh_temp_path("_apply_merge_typo.3mf");
+    const std::string mfdir = fresh_temp_path("_apply_merge_typo_d");
+    fs::create_directories(mfdir);
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+    std::string mf = write_manifest(mfdir,
+        R"({"version":1,"operations":[{"op":"object.merge-parts","name":"AnyName",)"
+        R"("parts":["a","b"],"into":"X","junk":1}]})");
+    auto r = spawn_cli({"project", "apply", in, "--manifest", mf});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
+
+TEST_CASE("project apply: object.auto-orient unknown field -> exit 1",
+          "[project_apply][e2e][exit7]") {
+    const std::string in    = fresh_temp_path("_apply_oao_typo.3mf");
+    const std::string mfdir = fresh_temp_path("_apply_oao_typo_d");
+    fs::create_directories(mfdir);
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+    std::string mf = write_manifest(mfdir,
+        R"({"version":1,"operations":[{"op":"object.auto-orient","name":"AnyName","junk":1}]})");
+    auto r = spawn_cli({"project", "apply", in, "--manifest", mf});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
+
+TEST_CASE("project apply: plate.auto-orient unknown field -> exit 1",
+          "[project_apply][e2e][exit7]") {
+    const std::string in    = fresh_temp_path("_apply_pao_typo.3mf");
+    const std::string mfdir = fresh_temp_path("_apply_pao_typo_d");
+    fs::create_directories(mfdir);
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+    std::string mf = write_manifest(mfdir,
+        R"({"version":1,"operations":[{"op":"plate.auto-orient","plate":"Plate 01 test","junk":1}]})");
+    auto r = spawn_cli({"project", "apply", in, "--manifest", mf});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
+
+// Semantic trigger — split-to-parts on a single-component cube.
+// Adds cube.stl via object.add in a first apply invocation, then attempts
+// split-to-parts in a second; single-component throws std::invalid_argument
+// which the override map remaps to exit 7 (invalid_state).
+TEST_CASE("project apply: split-to-parts on single-component mesh -> exit 7",
+          "[project_apply][e2e][exit7]") {
+    const std::string in    = fresh_temp_path("_apply_split_sem.3mf");
+    const std::string mfdir = fresh_temp_path("_apply_split_sem_d");
+    fs::create_directories(mfdir);
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+
+    // Step 1: add cube.stl as a named object via project apply so we have a
+    // known single-component target on the plate.
+    {
+        const std::string cube_stl = canonical_committed_stl_dir() + "/cube.stl";
+        REQUIRE(fs::exists(cube_stl));
+        // Build the manifest body with a forward-slash-normalised STL path
+        // embedded as an absolute path so g_manifest_dir resolution is bypassed.
+        std::string stl_escaped = cube_stl;
+        // On Windows backslashes inside JSON strings must be doubled.
+        std::string stl_json;
+        for (char c : stl_escaped)
+            stl_json += (c == '\\') ? std::string("\\\\") : std::string(1, c);
+
+        std::string body = std::string("{\"version\":1,\"operations\":[{\"op\":\"object.add\",")
+            + "\"plate\":\"Plate 01 test\","
+            + "\"stl\":\"" + stl_json + "\","
+            + "\"name\":\"split_target\"}]}";
+        std::string mf_setup = write_manifest(mfdir, body);
+        auto setup_r = spawn_cli({"project", "apply", in, "--manifest", mf_setup});
+        INFO("setup stderr: " << setup_r.stderr_text);
+        REQUIRE(setup_r.exit_code == 0);
+    }
+
+    // Step 2: attempt to split — single-component cube throws
+    // std::invalid_argument inside split_object_to_parts; the override entry
+    // for object.split-to-parts remaps that to exit 7 / invalid_state.
+    {
+        std::string mf = write_manifest(mfdir,
+            R"({"version":1,"operations":[{"op":"object.split-to-parts","name":"split_target"}]})");
+        auto r = spawn_cli({"project", "apply", in, "--manifest", mf});
+        INFO("split stderr: " << r.stderr_text);
+        REQUIRE(r.exit_code == 7);
+        REQUIRE(r.stderr_text.find("invalid_state") != std::string::npos);
+    }
+
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
