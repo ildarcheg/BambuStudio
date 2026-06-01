@@ -191,6 +191,15 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("object.remove: missing or non-string 'name'");
         remove_object(s, step["name"].get<std::string>());
     };
+
+    m_handlers["object.set-filament"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name", "filament", "part"});
+        if (!step.contains("name") || !step["name"].is_string())
+            throw ManifestFieldError("object.set-filament: missing or non-string 'name'");
+        int filament = parse_filament(step, "filament");
+        std::string part = step.value("part", std::string{});
+        set_object_filament(s, step["name"].get<std::string>(), filament, part);
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const

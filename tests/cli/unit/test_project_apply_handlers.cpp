@@ -372,3 +372,59 @@ TEST_CASE("object.remove: unknown field throws",
     json step = {{"op","object.remove"},{"name","X"},{"junk",1}};
     REQUIRE_THROWS_AS(reg.lookup("object.remove").fn(s, step), ManifestFieldError);
 }
+
+// ---------- object.set-filament tests ----------
+
+TEST_CASE("object.set-filament: happy path sets object-level filament",
+          "[project_apply][object.set-filament]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    // Add an object so there is something to target.
+    HandlerRegistry reg;
+    json add_step = {
+        {"op", "object.add"},
+        {"plate", "Plate 01 test"},
+        {"stl",   bambu_cli_unit::fixture_stl("cube.stl")},
+        {"name",  "filament_target"},
+    };
+    REQUIRE_NOTHROW(reg.lookup("object.add").fn(s, add_step));
+    auto objs = bambu_cli::list_objects(s, "");
+    REQUIRE_FALSE(objs.empty());
+    std::string target = objs.front().object_name;
+    reg.lookup("object.set-filament").fn(s,
+        json{{"op","object.set-filament"},{"name",target},{"filament",2}});
+    SUCCEED("object.set-filament applied without throwing");
+}
+
+TEST_CASE("object.set-filament: missing name throws",
+          "[project_apply][object.set-filament]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("object.set-filament").fn(s,
+        json{{"op","object.set-filament"},{"filament",2}}),
+        ManifestFieldError);
+}
+
+TEST_CASE("object.set-filament: missing filament throws",
+          "[project_apply][object.set-filament]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("object.set-filament").fn(s,
+        json{{"op","object.set-filament"},{"name","X"}}),
+        ManifestFieldError);
+}
+
+TEST_CASE("object.set-filament: non-integer filament throws",
+          "[project_apply][object.set-filament]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.set-filament"},{"name","X"},{"filament","2"}};
+    REQUIRE_THROWS_AS(reg.lookup("object.set-filament").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.set-filament: unknown field throws",
+          "[project_apply][object.set-filament]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.set-filament"},{"name","X"},{"filament",2},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("object.set-filament").fn(s, step), ManifestFieldError);
+}
