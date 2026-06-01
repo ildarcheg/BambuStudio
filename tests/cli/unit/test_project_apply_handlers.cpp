@@ -602,3 +602,53 @@ TEST_CASE("config.set: empty values map rejected", "[project_apply][config.set]"
     json step = {{"op","config.set"}, {"values", json::object()}};
     REQUIRE_THROWS_AS(reg.lookup("config.set").fn(s, step), ManifestFieldError);
 }
+
+// ---------- config.unset tests ----------
+
+TEST_CASE("config.unset: single key happy", "[project_apply][config.unset]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    // Set first, then unset.
+    reg.lookup("config.set").fn(s, json{{"op","config.set"},{"key","layer_height"},{"value","0.2"}});
+    REQUIRE_NOTHROW(reg.lookup("config.unset").fn(s,
+        json{{"op","config.unset"},{"key","layer_height"}}));
+}
+
+TEST_CASE("config.unset: keys array happy", "[project_apply][config.unset]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    reg.lookup("config.set").fn(s, json{
+        {"op","config.set"},
+        {"values", {{"layer_height","0.2"},{"line_width","0.5"}}}});
+    REQUIRE_NOTHROW(reg.lookup("config.unset").fn(s, json{
+        {"op","config.unset"},
+        {"keys", json::array({"layer_height","line_width"})}}));
+}
+
+TEST_CASE("config.unset: both forms rejected", "[project_apply][config.unset]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","config.unset"},{"key","x"},{"keys",json::array({"y"})}};
+    REQUIRE_THROWS_AS(reg.lookup("config.unset").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.unset: neither form rejected", "[project_apply][config.unset]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("config.unset").fn(s, json{{"op","config.unset"}}),
+                      ManifestFieldError);
+}
+
+TEST_CASE("config.unset: unknown field rejected", "[project_apply][config.unset]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","config.unset"},{"key","x"},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("config.unset").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.unset: empty keys array rejected", "[project_apply][config.unset]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","config.unset"},{"keys",json::array()}};
+    REQUIRE_THROWS_AS(reg.lookup("config.unset").fn(s, step), ManifestFieldError);
+}

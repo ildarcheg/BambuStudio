@@ -281,6 +281,35 @@ HandlerRegistry::HandlerRegistry()
             config_set(s, object_name, it.key(), it.value().get<std::string>());
         }
     };
+
+    // ---- config.unset ----
+    m_handlers["config.unset"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "object", "key", "keys"});
+        std::string object_name = step.value("object", std::string{});
+
+        const bool has_single = step.contains("key");
+        const bool has_batch  = step.contains("keys");
+        if (has_single && has_batch)
+            throw ManifestFieldError("config.unset: 'key' and 'keys' are mutually exclusive");
+        if (!has_single && !has_batch)
+            throw ManifestFieldError("config.unset: provide either 'key' or 'keys'");
+
+        if (has_single) {
+            if (!step["key"].is_string())
+                throw ManifestFieldError("config.unset: 'key' must be a string");
+            config_unset(s, object_name, step["key"].get<std::string>());
+            return;
+        }
+
+        const auto& ks = step["keys"];
+        if (!ks.is_array() || ks.empty())
+            throw ManifestFieldError("config.unset: 'keys' must be a non-empty array");
+        for (const auto& v : ks) {
+            if (!v.is_string())
+                throw ManifestFieldError("config.unset: 'keys' entry must be a string");
+            config_unset(s, object_name, v.get<std::string>());
+        }
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
