@@ -1,10 +1,12 @@
 // bambu-cli `project apply` — batch manifest verb.
 // See docs/superpowers/specs/2026-05-31-project-apply-batch-design.md.
 
+#include "../apply_helpers.hpp"
 #include "../exception_dispatch.hpp"
 #include "../exceptions.hpp"
 #include "../io.hpp"
 #include "../json_output.hpp"
+#include "../project_ops.hpp"
 #include "../project_state.hpp"
 #include "../extern/CLI11/CLI11.hpp"
 #include "project_apply_internal.hpp"
@@ -74,6 +76,29 @@ void parse_and_validate_manifest(const json& m)
             throw ManifestFieldError(
                 "step " + std::to_string(i) + ": 'op' must be non-empty");
     }
+}
+
+// ---------- handler registry ----------
+
+HandlerRegistry::HandlerRegistry()
+{
+    // ---------- plate ops ----------
+    m_handlers["plate.add"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name"});
+        if (!step.contains("name"))
+            throw ManifestFieldError("plate.add: missing required field 'name'");
+        if (!step["name"].is_string())
+            throw ManifestFieldError("plate.add: 'name' must be a string");
+        add_plate(s, step["name"].get<std::string>());
+    };
+}
+
+const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
+{
+    auto it = m_handlers.find(op);
+    if (it == m_handlers.end())
+        throw ManifestFieldError("unknown op: '" + op + "'");
+    return it->second;
 }
 
 // ---------- file load ----------
@@ -155,8 +180,28 @@ static void run_apply(OutputMode mode, const ApplyArgs& a)
         std::exit(lr.exit_code);
     }
 
-    // Stage 5: dispatch each op. (No handlers yet — coming in Task 8.)
-    // This empty-ops happy path is what we exercise in the e2e test below.
+    // Stage 5: dispatch each op.
+    static const HandlerRegistry registry;
+    std::size_t step_index = 0;
+    for (const auto& step : manifest["operations"]) {
+        ++step_index;
+        const std::string op = step["op"].get<std::string>();
+        const HandlerEntry* entry = nullptr;
+        try {
+            entry = &registry.lookup(op);   // may throw ManifestFieldError
+            entry->fn(state, step);
+        } catch (const std::exception& e) {
+            auto d = exception_dispatch::dispatch(
+                e, entry ? entry->overrides : MutationExceptionMap{});
+            json data;
+            data["step"] = step_index;
+            data["op"]   = op;
+            std::ostringstream msg;
+            msg << "step " << step_index << " (op '" << op << "'): " << d.message;
+            emit_error(mode, d.code, msg.str(), data);
+            std::exit(d.exit_code);
+        }
+    }
 
     // Stage 6: save (skip on --dry-run).
     const std::string& out = a.out_path.empty() ? a.in_path : a.out_path;
