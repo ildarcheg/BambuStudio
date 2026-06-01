@@ -29,9 +29,11 @@ in a single CLI call.
   each naming a verb and its arguments. 1:1 mapping to existing
   `project_ops` functions; no diff-style declarative semantics.
 - Dispatch is **centralized** in a new `commands/project_apply.cpp`,
-  using a `std::unordered_map<std::string, OpHandler>` registry
-  populated at startup. One handler per supported op. Approach A from
-  brainstorming.
+  using a `std::unordered_map<std::string, HandlerEntry>` registry
+  populated at startup, where each `HandlerEntry` bundles a handler
+  lambda with its per-op `MutationExceptionMap` (empty for most ops;
+  non-empty for the four exit-7 verbs — see below). One entry per
+  supported op. Approach A from brainstorming.
 - All mutations operate on an in-memory `ProjectState`. **One**
   `load_project` at the start, **one** `save_project` at the end. The
   existing `.bak`-swap atomic save and 3-check invariant guard run once
@@ -43,7 +45,30 @@ in a single CLI call.
 - The exception → exit-code mapping currently inlined in
   `mutation_runner.hpp` is **lifted into a shared helper**
   (`exception_dispatch.hpp`) and reused by both the single-op envelope
-  and the batch dispatcher. Behaviour-preserving refactor.
+  and the batch dispatcher. Behaviour-preserving for the single-op
+  path: existing call sites keep passing their `MutationExceptionMap`
+  unchanged and produce byte-identical exit codes / messages.
+- Four existing verbs (`object.split-to-parts`, `object.merge-parts`,
+  `object.auto-orient`, `plate.auto-orient`) install per-call-site
+  exception overrides that remap `std::invalid_argument` or
+  `std::runtime_error` to exit 7 (`invalid_state`). The batch
+  dispatcher carries an equivalent **per-op override map** (attached
+  to each `HandlerRegistry` entry) and threads it into every
+  `exception_dispatch::dispatch(e, op_overrides)` call so those four
+  verbs continue producing exit 7 when invoked via the manifest.
+- A dedicated **`ManifestFieldError`** exception type (deriving from
+  `std::invalid_argument`) is introduced in `exceptions.hpp` for
+  schema-shape errors thrown by `require_only` and every handler's
+  field-validation code. `exception_dispatch::dispatch` recognises it
+  in a short-circuit branch *before* the override-map lookup, so
+  manifest-shape typos always route to `exit 1` (`usage_error`) even
+  on verbs that override `std::invalid_argument` to exit 7. Semantic
+  `std::invalid_argument` thrown from inside `project_ops` (mesh-state
+  checks, etc.) continues to route through the override map.
+- A `--dry-run` flag runs stages 1–5 of the dispatch flow and then
+  **skips `save_project`**. Under the all-or-nothing model, state is
+  discarded at process exit anyway, so dry-run is implemented as a
+  single `if (!dry_run) save_project(...)` guard with no deep-copy.
 - STL paths inside the manifest are resolved relative to the
   **manifest file's directory** (not the CWD), so a manifest + STLs
   folder is a portable self-contained bundle. Absolute paths still
@@ -52,7 +77,7 @@ in a single CLI call.
 ## Scope
 
 In scope:
-- `project apply in.3mf --manifest m.json [--output out.3mf]`
+- `project apply in.3mf --manifest m.json [--output out.3mf] [--dry-run]`
 - Manifest schema (envelope, op shape, type rules, strictness)
 - Full parity with every existing mutating verb:
   - `plate.add` / `plate.remove` / `plate.rename`
@@ -61,7 +86,18 @@ In scope:
   - `object.auto-orient` / `object.split-to-parts` / `object.merge-parts`
   - `config.set` / `config.unset` (with batch shorthand)
 - `exception_dispatch.hpp` refactor (lift the dynamic_cast table out
-  of `mutation_runner.hpp`)
+  of `mutation_runner.hpp`, add the `ManifestFieldError` short-circuit
+  branch)
+- `ManifestFieldError` exception type in `exceptions.hpp`, thrown by
+  all schema-validation paths so manifest typos route to exit 1 even
+  on verbs whose `MutationExceptionMap` remaps `std::invalid_argument`
+- Per-op override threading in `HandlerRegistry` so the four exit-7
+  verbs (split-to-parts, merge-parts, object.auto-orient,
+  plate.auto-orient) produce the same exit codes via batch as via
+  their existing single-verb call sites
+- `--dry-run` flag: validate manifest, load project, run all ops
+  in-memory, skip `save_project`. One-line implementation via a
+  guard at stage 6
 - `emit_error` signature extension (optional `data` blob)
 - Unit, manifest-validation, e2e, and roundtrip test coverage
 
@@ -74,10 +110,10 @@ Out of scope (explicit):
   existing `project_ops` functions.
 - **`--continue-on-error`** / best-effort mode. Half-applied batches
   produce silent partial-correctness bugs; the 12-plate workflow has
-  no use case for it.
-- **`--dry-run`** mode (validate manifest + check ops succeed without
-  saving). Implementing without a deep-copy of `ProjectState` requires
-  per-op validate-isolated branches. Defer to v1.1 if requested.
+  no use case for it. (Unlike `--dry-run`, this *does* require a
+  per-op checkpoint — i.e. a deep-copy of `ProjectState` before each
+  op so the failing op's partial mutations can be rolled back — which
+  is the actual deep-copy concern.)
 - **`--check-stls`** pre-flight existence check. The natural error path
   (`load_stl` → `parse_failure` exit 3) already surfaces missing STLs
   correctly; the pre-flight would only improve UX latency. Defer.
@@ -92,14 +128,20 @@ Out of scope (explicit):
 ## CLI shape
 
 ```
-bambu-cli project apply <in.3mf> --manifest <m.json> [--output <out.3mf>] [--json]
+bambu-cli project apply <in.3mf> --manifest <m.json>
+                                  [--output <out.3mf>] [--dry-run] [--json]
 ```
 
 Arguments:
 - positional `in.3mf` — input project, required.
 - `--manifest <path>` — path to the JSON manifest, required.
 - `--output <path>` — output path; defaults to in-place (same as every
-  mutating verb).
+  mutating verb). Ignored when `--dry-run` is set.
+- `--dry-run` — run the full dispatch flow (load, parse manifest,
+  apply every op against the in-memory `ProjectState`) but **skip
+  `save_project`**. Validates that the manifest succeeds against the
+  real input file without writing anything. Exit code reflects
+  success / first-failure exactly as if the run had saved.
 - `--json` — top-level flag already plumbed via `mode_out`; switches
   success/error envelopes to Shape A.
 
@@ -235,6 +277,43 @@ be present. Both forms → `exit 1`. Neither → `exit 1`.
 Both semantics are inherited unchanged from the underlying
 `project_ops` functions. The dispatcher calls into them directly.
 
+### Exit-7 verbs and the schema-vs-semantic split
+
+Four verbs map a stdlib exception to `exit 7` (`invalid_state`) via
+per-call-site override maps in the single-verb code path
+(`object.cpp:191-192,235-236,262-264`, `plate.cpp:184-186`):
+
+| op                       | override                            | meaning                                  |
+|--------------------------|-------------------------------------|------------------------------------------|
+| `object.split-to-parts`  | `std::invalid_argument` → exit 7    | mesh-state check (single-volume, etc.)   |
+| `object.merge-parts`     | `std::invalid_argument` → exit 7    | mesh-state / per-volume invariant check  |
+| `object.auto-orient`     | `std::runtime_error` → exit 7       | orient engine failure                    |
+| `plate.auto-orient`      | `std::runtime_error` → exit 7       | orient engine failure                    |
+
+The batch dispatcher carries the same overrides per-op (see
+[Implementation skeleton](#registry)) so these verbs continue to
+emit exit 7 when invoked through the manifest — matching the per-op
+error-code column above.
+
+**Schema vs semantic — the overload trap.** In the single-verb path,
+CLI11 handles argument parsing, so the only `std::invalid_argument`
+that ever reaches `run_mutation` on `split-to-parts` / `merge-parts`
+is the mesh-state check, and the blanket `invalid_argument → exit 7`
+override is safe. In the batch path, schema validators
+(`require_only`, type checks in each handler) **also** throw an
+`invalid_argument` subclass for "unknown field" / "missing field" /
+"wrong type" errors. Naively reusing the override map would route a
+manifest typo on a `merge-parts` op to exit 7 (`invalid_state`)
+instead of exit 1 (`usage_error`).
+
+The spec resolves this by introducing
+`ManifestFieldError : public std::invalid_argument` and short-circuiting
+it in `exception_dispatch::dispatch` *before* the override-map lookup
+(see [`exception_dispatch` refactor](#exception_dispatch-refactor)).
+All schema-validation code throws `ManifestFieldError`; semantic
+project_ops failures keep throwing plain `std::invalid_argument`. The
+two stay distinguishable.
+
 ## Transform shape
 
 For `object.add`. All three sections optional. Presence of any axis in
@@ -290,6 +369,21 @@ Semantics:
   nothing).
 - The same `object` field applies to all entries in the map.
 
+**Per-entry error reporting.** When entry N of a `values` map (or
+`keys` array) fails, the failing key must be named in both the
+message and the JSON data blob; debugging a 6-key collapsed op is
+otherwise guesswork. The handler wraps the underlying
+`config_set` / `config_unset` exception, re-throws it with the
+failing key prefixed into the message, and attaches a `failing_key`
+field to the error envelope (see
+[Error envelope — `failing_key`](#config-batch-failing_key)).
+
+Example message for a bad value on the third entry:
+```
+bad_config: step 4 (op 'config.set', failing_key 'sparse_infill_density'):
+  invalid value "20" for option sparse_infill_density (expected percent)
+```
+
 `config.unset` mirrors the shape:
 ```jsonc
 { "op": "config.unset", "keys": ["a", "b", "c"], "object": "MyPart" }
@@ -337,14 +431,26 @@ underlying `load_stl`; the existing exception table routes that to
 3. enforce 10k cap                                         [pre-load]
 4. load_project(in.3mf) → ProjectState                     [one disk read]
 5. for i, step in enumerate(operations, 1):
-       handler = registry.lookup(step["op"])
-       handler(state, step)                                ← may throw
-6. save_project(state, out.3mf)                            [one atomic save]
+       entry   = registry.lookup(step["op"])               ← may throw (unknown op)
+       try { entry.fn(state, step) }
+       catch { dispatch(e, entry.overrides) and exit }     ← may throw
+6. if (!dry_run) save_project(state, out.3mf)              [one atomic save]
 ```
 
 Stages 1–3 are pre-load: if the manifest is malformed, the `.3mf` is
 not even read. Stage 5 throws on any failure; the catch block does
-**not** call `save_project`. Stage 6 runs only after all ops succeed.
+**not** call `save_project`. Stage 6 runs only after all ops succeed
+**and** `--dry-run` was not set.
+
+**`--dry-run` rationale.** Under the all-or-nothing design, every op
+mutates the in-memory `ProjectState` only, and `save_project` runs
+exactly once at the end. The process exits and discards the in-memory
+state regardless of whether step 6 ran. Therefore `--dry-run` is
+implemented as a single boolean guard at stage 6 with no `ProjectState`
+deep-copy and no per-op isolation branches. The semantic value is
+high: a manifest generated by a higher-level tool can be validated
+against the *actual* target `.3mf` (catching e.g. unknown plate names,
+clashing identifiers, off-bed placement) without writing anything.
 
 ### Two-stage validation
 
@@ -353,9 +459,16 @@ not even read. Stage 5 throws on any failure; the catch block does
 | **1. Static (pre-load)** | JSON parses; `version == 1`; `operations` is array; no unknown top-level keys; size ≤ 10000; every step has a string `op` | Cheap, no disk I/O against the `.3mf` |
 | **2. Per-op (during dispatch)** | Required fields present, types correct, unknown fields rejected (`require_only`), then underlying `project_ops` semantics | Field shape is op-specific; co-located with each handler |
 
-Per-op field validation throws `std::invalid_argument` → routed by the
-existing exception table to `exit 1` (`usage_error`). The step/op
-prefix is added by the dispatcher's catch block.
+Per-op field validation throws **`ManifestFieldError`** (a
+`std::invalid_argument` subclass). `exception_dispatch::dispatch`
+short-circuits it to `exit 1` (`usage_error`) before consulting the
+per-op override map — see
+[Exit-7 verbs and the schema-vs-semantic split](#exit-7-verbs-and-the-schema-vs-semantic-split)
+for why this matters on verbs that remap `std::invalid_argument` to
+exit 7. Semantic checks inside `project_ops` (mesh-state, off-bed,
+duplicate names) keep throwing their existing exception types and
+keep routing through the override map. The step/op prefix is added
+by the dispatcher's catch block.
 
 ### What atomicity guarantees
 
@@ -430,17 +543,44 @@ distinguishes them with a `manifest: ` prefix:
 usage_error: manifest: unknown top-level key 'operation' (did you mean 'operations'?)
 ```
 
+### Config batch — `failing_key`
+
+For `config.set` with `values` or `config.unset` with `keys`, a
+mid-batch entry failure carries the failing key both in the message
+(after the `step N (op '...'):` prefix) and as a `failing_key` field
+in the data blob.
+
+JSON-mode example:
+```jsonc
+{
+  "status": "error",
+  "code": "bad_config",
+  "message": "step 4 (op 'config.set', failing_key 'sparse_infill_density'): invalid value \"20\" for option sparse_infill_density (expected percent)",
+  "step": 4,
+  "op": "config.set",
+  "failing_key": "sparse_infill_density"
+}
+```
+
+Text mode flattens the same content to a single stderr line.
+
+`failing_key` is omitted from the envelope when the failing op is not
+in batch-shorthand form (single-key `config.set`, single-key
+`config.unset`, or any other op). Tools filtering on this field
+should treat absence as "not a config-batch failure".
+
 ## Implementation skeleton
 
 ### File map
 
 | File | Status | Purpose | Approx LOC |
 |------|--------|---------|------------|
-| `src/cli/commands/project_apply.cpp`        | new          | `register_project_apply_subcommand`, manifest parsing, handler registry, dispatch loop | ~300 |
-| `src/cli/apply_helpers.hpp` + `.cpp`        | new          | `require_only`, `parse_transform`, `parse_filament`, plus small typed-getters | ~80 |
-| `src/cli/exception_dispatch.hpp` + `.cpp`   | new (refactor) | Lifts the `dynamic_cast` exception → (exit, code) table out of `mutation_runner.hpp` | ~60 |
+| `src/cli/commands/project_apply.cpp`        | new          | `register_project_apply_subcommand`, manifest parsing, handler registry (entries carry per-op overrides), dispatch loop, `--dry-run` gate | ~320 |
+| `src/cli/apply_helpers.hpp` + `.cpp`        | new          | `require_only`, `parse_transform`, `parse_filament`, plus small typed-getters. All throw `ManifestFieldError` on schema-shape errors. | ~80 |
+| `src/cli/exception_dispatch.hpp` + `.cpp`   | new (refactor) | Lifts the `dynamic_cast` exception → (exit, code) table out of `mutation_runner.hpp`, adds the `ManifestFieldError` short-circuit branch before the override-map lookup | ~70 |
+| `src/cli/exceptions.hpp`                    | extend       | Add `ManifestFieldError : public std::invalid_argument` alongside the existing typed-exception hierarchy | ~5 |
 | `src/cli/json_output.hpp` / `.cpp`          | extend       | `emit_error` gains optional `data` blob | ~5 |
-| `src/cli/commands/mutation_runner.hpp`      | tweak        | Catch block delegates to `exception_dispatch.hpp` | ~−30 |
+| `src/cli/commands/mutation_runner.hpp`      | tweak        | Catch block delegates to `exception_dispatch.hpp`; still passes the per-call-site `MutationExceptionMap` through unchanged | ~−30 |
 | `src/cli/commands/project.cpp`              | tweak        | Call `register_project_apply_subcommand` | ~3 |
 | `src/cli/CMakeLists.txt`                    | tweak        | Add new TUs to `bambu_cli_core` | ~4 |
 
@@ -448,6 +588,11 @@ usage_error: manifest: unknown top-level key 'operation' (did you mean 'operatio
 
 ```cpp
 using OpHandler = std::function<void(ProjectState&, const nlohmann::json& step)>;
+
+struct HandlerEntry {
+    OpHandler            fn;
+    MutationExceptionMap overrides;   // empty for ops without exit-7 remapping
+};
 ```
 
 The full step object (including its `"op"` key) is passed; handlers
@@ -455,42 +600,79 @@ ignore the `op` key via `require_only`. Returning `void` keeps each
 handler tight. Per-step success messages are not emitted; the final
 success message reports cumulative count + output path.
 
+Each entry's `overrides` map mirrors the per-call-site
+`MutationExceptionMap` installed by the corresponding single-verb
+callback. Concretely, four entries carry non-empty overrides:
+
+```cpp
+m_handlers["object.split-to-parts"].overrides = {
+    { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
+};
+m_handlers["object.merge-parts"].overrides = {
+    { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
+};
+m_handlers["object.auto-orient"].overrides = {
+    { std::type_index(typeid(std::runtime_error)),    {7, "invalid_state"} },
+};
+m_handlers["plate.auto-orient"].overrides = {
+    { std::type_index(typeid(std::runtime_error)),    {7, "invalid_state"} },
+};
+```
+
+All other entries have an empty `overrides` (default-constructed).
+These overrides exactly mirror `object.cpp:191-192,235-236,262-264`
+and `plate.cpp:184-186` in the existing single-verb callbacks.
+
+Schema-validation errors thrown by `require_only` and per-handler
+field checks (`ManifestFieldError`) bypass the override lookup
+entirely — see the [`exception_dispatch` refactor](#exception_dispatch-refactor).
+
 ### Registry
 
 ```cpp
 class HandlerRegistry {
 public:
     HandlerRegistry();
-    void dispatch(ProjectState&, const std::string& op,
-                  const nlohmann::json& step) const;
+    const HandlerEntry& lookup(const std::string& op) const;
 private:
-    std::unordered_map<std::string, OpHandler> m_handlers;
+    std::unordered_map<std::string, HandlerEntry> m_handlers;
 };
 ```
 
 Populated once in the constructor (one entry per op). The dispatcher
 holds a function-local `static const HandlerRegistry`. Unknown op →
-`std::invalid_argument("unknown op: '" + op + "'")` → routed to
-`exit 1` by `exception_dispatch`.
+`ManifestFieldError("unknown op: '" + op + "'")` thrown from
+`lookup`, short-circuited to `exit 1` by `exception_dispatch`.
 
 ### Sample handler (plate.add)
 
 ```cpp
-m_handlers["plate.add"] = [](ProjectState& s, const json& step) {
+m_handlers["plate.add"].fn = [](ProjectState& s, const json& step) {
     require_only(step, {"op", "name"});
     if (!step.contains("name") || !step["name"].is_string())
-        throw std::invalid_argument("plate.add: missing or non-string 'name'");
+        throw ManifestFieldError("plate.add: missing or non-string 'name'");
     add_plate(s, step["name"].get<std::string>());
 };
+// .overrides defaults to empty — plate.add has no exit-7 remapping
 ```
 
 Every handler follows the shape:
-1. `require_only(step, {known keys})`
+1. `require_only(step, {known keys})` — throws `ManifestFieldError`
+   on any extra field.
 2. Type-check required fields (`is_string`, `is_number_integer`, etc.),
-   throwing `std::invalid_argument` on miss.
+   throwing `ManifestFieldError` on miss or type mismatch.
 3. Read optional fields via `step.value("key", default)` or `contains` +
    typed `get`.
-4. Call into the matching `project_ops` function.
+4. Call into the matching `project_ops` function. Any semantic
+   exception thrown from there (`DuplicateNameError`,
+   `PlacementFailure`, `std::invalid_argument` for mesh state, etc.)
+   propagates unchanged and is routed via the entry's `overrides`
+   map plus the built-in dispatch table.
+
+Schema vs semantic: schema mistakes throw `ManifestFieldError`
+(→ exit 1); semantic mistakes throw whatever `project_ops` already
+throws (→ inherited exit code, possibly remapped by the entry's
+`overrides`). The two paths never collide.
 
 ### `require_only`
 
@@ -500,9 +682,8 @@ void require_only(const nlohmann::json& step,
                   std::initializer_list<const char*> known_keys);
 ```
 
-Iterates `step.items()`; throws `std::invalid_argument` for any key
-not in `known_keys`. Single point of truth for the strict-schema rule
-(Section 5).
+Iterates `step.items()`; throws **`ManifestFieldError`** for any key
+not in `known_keys`. Single point of truth for the strict-schema rule.
 
 ### `parse_transform`
 
@@ -514,7 +695,7 @@ ManualTransform parse_transform(const nlohmann::json& step);
 Reads `translate`, `rotate`, `scale` sections; returns a populated
 `ManualTransform` (with the right `has_*` flags). Handles object form,
 the uniform-scale numeric shorthand, and missing-axis defaults
-(0 for translate/rotate, 1 for scale). Throws `std::invalid_argument`
+(0 for translate/rotate, 1 for scale). Throws **`ManifestFieldError`**
 on:
 - A section that is neither object nor (for `scale` only) number.
 - An unknown axis key on a transform object.
@@ -525,27 +706,49 @@ on:
 parse + validate manifest header                      ; Stage 1
 load_project(in_path) → state                         ; one read
 for i, step in enumerate(manifest["operations"], 1):
-    op = step["op"]                                   ; already validated to be a string
+    op    = step["op"]                                ; already validated to be a string
+    entry = registry.lookup(op)                       ; may throw ManifestFieldError
     try:
-        registry.dispatch(state, op, step)
+        entry.fn(state, step)
     except std::exception as e:
-        d = exception_dispatch::dispatch(e)
+        d = exception_dispatch::dispatch(e, entry.overrides)   ; ← threads per-op overrides
         data = { "step": i, "op": op }
+        if (handler attached a failing_key context):
+            data["failing_key"] = failing_key
         emit_error(mode, d.code,
-                   "step " + i + " (op '" + op + "'): " + d.message,
+                   "step " + i + " (op '" + op + "'"
+                       + (failing_key ? ", failing_key '" + failing_key + "'" : "")
+                       + "): " + d.message,
                    data)
         std::exit(d.exit_code)
 out = output_path.empty() ? in_path : output_path
-save_project(state, out)                              ; one write
+if (!dry_run):
+    save_project(state, out)                          ; one write, conditional
 emit_ok(mode, "ok",
-        "applied " + N + " ops -> " + out,
-        { "steps_applied": N, "output": out })
+        (dry_run ? "dry-run: "       : "applied ")
+        + N + " ops"
+        + (dry_run ? ""              : " -> " + out),
+        { "steps_applied": N,
+          "output":  (dry_run ? null : out),
+          "dry_run": dry_run })
 ```
+
+The `entry.overrides` argument is what restores exit-7 behaviour for
+the four affected verbs; the `ManifestFieldError` short-circuit inside
+`dispatch` is what keeps schema typos from being caught by those same
+overrides. Both mechanisms are necessary; either alone is incorrect.
+
+For `config.set` / `config.unset` batch shorthand, the handler catches
+the underlying `config_set` / `config_unset` exception, captures the
+key it was processing, and re-throws (or rethrows-with-wrap) so the
+dispatcher can attach `failing_key` to both the message and the
+`data` blob.
 
 ### `exception_dispatch` refactor
 
 The `dynamic_cast` chain currently in `mutation_runner.hpp:87-123`
-moves to a free function:
+moves to a free function, with a new short-circuit at the top for
+`ManifestFieldError`:
 
 ```cpp
 // exception_dispatch.hpp
@@ -563,6 +766,38 @@ Dispatched dispatch(const std::exception& e,
 } // namespace
 ```
 
+`exception_dispatch.cpp` implements the function as:
+
+```cpp
+Dispatched dispatch(const std::exception& e,
+                    const MutationExceptionMap& overrides)
+{
+    // 0. Schema errors always route to exit 1, regardless of overrides.
+    //    This is what prevents per-op invalid_argument overrides
+    //    (split/merge → exit 7) from accidentally catching manifest
+    //    schema typos. Short-circuit BEFORE the override lookup.
+    if (dynamic_cast<const ManifestFieldError*>(&e))
+        return {to_int(ExitCode::usage_error), "usage_error", e.what()};
+
+    // 1. Per-call-site override map (exact dynamic type match).
+    auto it = overrides.find(std::type_index(typeid(e)));
+    if (it != overrides.end())
+        return {it->second.first, it->second.second, e.what()};
+
+    // 2. Built-in typed-exception defaults via dynamic_cast.
+    //    (Order: typed subclasses of runtime_error precede the
+    //    runtime_error catch-all.)
+    if (dynamic_cast<const PlacementFailure*>(&e))     return {9, "placement_failure",   e.what()};
+    if (dynamic_cast<const BadConfigError*>(&e))       return {4, "bad_config",          e.what()};
+    if (dynamic_cast<const DuplicateNameError*>(&e))   return {5, "duplicate_name",      e.what()};
+    if (dynamic_cast<const FileNotFoundError*>(&e))    return {2, "file_not_found",      e.what()};
+    if (dynamic_cast<const InvariantViolation*>(&e))   return {8, "invariant_violation", e.what()};
+    if (dynamic_cast<const std::invalid_argument*>(&e))return {1, "usage_error",         e.what()};
+    if (dynamic_cast<const std::out_of_range*>(&e))    return {6, "unknown_reference",   e.what()};
+    return {3, "parse_failure", e.what()};   // catch-all (runtime_error etc.)
+}
+```
+
 `mutation_runner.hpp`'s catch block shrinks to:
 ```cpp
 } catch (const std::exception& e) {
@@ -575,9 +810,16 @@ Dispatched dispatch(const std::exception& e,
 `project_apply.cpp` reuses the same `dispatch` call but wraps the
 message with the step/op prefix and adds the data blob.
 
-Behaviour-preserving: the dispatch table is byte-identical to the
-existing inline ladder. The full 331-case test suite must remain
-green after the refactor.
+**Behaviour-preserving for the single-verb path.** The single-verb
+code path has no schema validators and never throws
+`ManifestFieldError`, so the new short-circuit branch is dead code
+for existing call sites. Each call site keeps passing its same
+`MutationExceptionMap` (`object.cpp:191-192,235-236,262-264`,
+`plate.cpp:184-186`); the dispatch table is byte-identical to the
+existing inline ladder for every exception type those sites can
+actually throw. The full 331-case test suite must remain green after
+the refactor — if any existing test changes behaviour, the refactor
+is wrong.
 
 ### Build & link
 
@@ -603,17 +845,24 @@ programmatically), looks up the handler, calls it with a synthetic
 
 - **Per-op happy path** (14 tests, one per op)
 - **Per-op required-field rejection** (~28 tests; for each required
-  field on each op, omit it, assert `std::invalid_argument`)
-- **Per-op unknown-field rejection** (14 tests; junk field per op)
-- **Per-op type-mismatch rejection** (~20 tests; strings for ints, etc.)
+  field on each op, omit it, assert `ManifestFieldError`)
+- **Per-op unknown-field rejection** (14 tests; junk field per op,
+  assert `ManifestFieldError`)
+- **Per-op type-mismatch rejection** (~20 tests; strings for ints,
+  etc., assert `ManifestFieldError`)
 - **Transform parsing** (8 tests: object form, missing axes, uniform
   scale shorthand, all three sections, none, unknown axis key,
   number-shaped `scale`, empty section)
 - **Config batch form** (6 tests: `values` with 3 keys, `keys` array
   with 2, both forms present → reject, neither → reject, single +
   batch mixed → reject, empty `values` map)
+- **Config batch failing-key reporting** (4 tests): mid-batch bad
+  key in `values` reports `failing_key` matching the offending entry
+  (text + JSON modes); mid-batch unknown key in `keys` array reports
+  the same; the message includes the failing key after the step/op
+  prefix.
 
-Total: ~90 unit tests.
+Total: ~94 unit tests.
 
 ### Manifest validation tests
 
@@ -664,8 +913,26 @@ stdout/stderr and exit code.
   with nlohmann line/column.
 - **10k cap**: programmatically generated manifest with 10001 ops →
   exit 1, cap message.
+- **Schema-vs-semantic on exit-7 verbs** (4 tests): for each of
+  `object.split-to-parts`, `object.merge-parts`, `object.auto-orient`,
+  `plate.auto-orient`:
+  - A manifest typo (unknown field on the op) → **exit 1**
+    (`usage_error`), proving `ManifestFieldError` is not caught by
+    the per-op `invalid_argument` / `runtime_error` override.
+  - A semantic failure trigger (e.g. `split-to-parts` on a
+    single-component mesh; `merge-parts` with a non-MODEL_PART
+    volume; `auto-orient` against an orient-engine failure case)
+    → **exit 7** (`invalid_state`), proving the override fires
+    correctly through the batch path.
+- **`--dry-run` happy path**: 5-op manifest with `--dry-run` →
+  exit 0; output file is **not** created (or, if `--output` points
+  at an existing file, the file mtime/checksum is unchanged);
+  stdout/JSON envelope indicates dry-run (`"dry_run": true` field).
+- **`--dry-run` failing path**: 5-op manifest with a bad step 3 and
+  `--dry-run` → exit code matches the failure (same as without
+  `--dry-run`); output file not created; input untouched.
 
-Total: ~12 E2E tests.
+Total: ~18 E2E tests.
 
 ### Roundtrip tests
 
@@ -690,12 +957,17 @@ Total: 3 roundtrip tests.
   ≥1 unknown-field rejection.
 - Every documented error code (1 / 4 / 5 / 6 / 7 / 9) triggered
   through the batch path by ≥1 E2E.
-- The `step` and `op` envelope fields tested in both text and
-  JSON modes.
+- Every exit-7 verb has a paired test proving schema typos route to
+  exit 1 (not 7) while semantic failures route to exit 7 (not 1).
+- The `step`, `op`, and `failing_key` envelope fields tested in both
+  text and JSON modes.
+- `--dry-run` exercised in both happy and failing paths, with an
+  assertion that `save_project` is never called (verified via the
+  same instrumentation used by the single-save roundtrip test).
 
 ### Estimated total
 
-~118 new test cases. No new fixtures beyond:
+~128 new test cases. No new fixtures beyond:
 - The existing `tests/cli/fixtures/test_reference.3mf`.
 - A small STL bundle in `tests/cli/fixtures/manifests/stls/`.
 - A handful of `.json` manifests under
@@ -718,9 +990,6 @@ own `mutation_runner` and can be ported back without batch support.
 
 - **`--check-stls` pre-flight**: iterate manifest, check every STL
   exists before `load_project`. Improves error latency only.
-- **`--dry-run`**: validate manifest + run ops without saving.
-  Requires deep-copy of `ProjectState` or per-op validate-isolated
-  branches.
 - **Stream-mode for very large manifests**: replace nlohmann's
   in-memory parse with SAX-style streaming. Only relevant if the
   10k cap is removed and users genuinely build >100k-op manifests.
