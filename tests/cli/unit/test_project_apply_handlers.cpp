@@ -1,3 +1,4 @@
+#include "apply_helpers.hpp"
 #include "commands/project_apply_internal.hpp"
 #include "io.hpp"
 #include "unit_helpers.hpp"
@@ -651,4 +652,40 @@ TEST_CASE("config.unset: empty keys array rejected", "[project_apply][config.uns
     HandlerRegistry reg;
     json step = {{"op","config.unset"},{"keys",json::array()}};
     REQUIRE_THROWS_AS(reg.lookup("config.unset").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.set values: failing key surfaces in ConfigBatchError",
+          "[project_apply][config.set][failing_key]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","config.set"},
+        {"values", {
+            {"layer_height", "0.2"},                  // ok
+            {"definitely_not_a_real_key", "value"}    // <- will fail
+        }}
+    };
+    try {
+        reg.lookup("config.set").fn(s, step);
+        FAIL("expected ConfigBatchError");
+    } catch (const bambu_cli::ConfigBatchError& e) {
+        REQUIRE(e.failing_key() == "definitely_not_a_real_key");
+        REQUIRE(e.dispatched().code == "bad_config");
+    }
+}
+
+TEST_CASE("config.unset keys: failing key surfaces in ConfigBatchError",
+          "[project_apply][config.unset][failing_key]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","config.unset"},
+        {"keys", json::array({"layer_height", "definitely_not_a_real_key"})}
+    };
+    try {
+        reg.lookup("config.unset").fn(s, step);
+        FAIL("expected ConfigBatchError");
+    } catch (const bambu_cli::ConfigBatchError& e) {
+        REQUIRE(e.failing_key() == "definitely_not_a_real_key");
+    }
 }

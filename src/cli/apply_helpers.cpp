@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 
 namespace bambu_cli {
 
@@ -91,5 +92,16 @@ ManualTransform parse_transform(const nlohmann::json& step)
 
     return t;
 }
+
+ConfigBatchError::ConfigBatchError(std::string failing_key,
+                                   exception_dispatch::Dispatched dispatched)
+    : m_failing_key(std::move(failing_key)),
+      m_dispatched(std::move(dispatched))
+{
+    m_what = "failing_key '" + m_failing_key + "': " + m_dispatched.message;
+}
+const char* ConfigBatchError::what() const noexcept { return m_what.c_str(); }
+const std::string& ConfigBatchError::failing_key() const noexcept { return m_failing_key; }
+const exception_dispatch::Dispatched& ConfigBatchError::dispatched() const noexcept { return m_dispatched; }
 
 } // namespace bambu_cli

@@ -278,7 +278,11 @@ HandlerRegistry::HandlerRegistry()
             if (!it.value().is_string())
                 throw ManifestFieldError(
                     "config.set: 'values' entry '" + it.key() + "' must be a string");
-            config_set(s, object_name, it.key(), it.value().get<std::string>());
+            try {
+                config_set(s, object_name, it.key(), it.value().get<std::string>());
+            } catch (const std::exception& inner) {
+                throw ConfigBatchError(it.key(), exception_dispatch::dispatch(inner));
+            }
         }
     };
 
@@ -307,7 +311,12 @@ HandlerRegistry::HandlerRegistry()
         for (const auto& v : ks) {
             if (!v.is_string())
                 throw ManifestFieldError("config.unset: 'keys' entry must be a string");
-            config_unset(s, object_name, v.get<std::string>());
+            std::string key = v.get<std::string>();
+            try {
+                config_unset(s, object_name, key);
+            } catch (const std::exception& inner) {
+                throw ConfigBatchError(key, exception_dispatch::dispatch(inner));
+            }
         }
     };
 }
@@ -412,6 +421,17 @@ static void run_apply(OutputMode mode, const ApplyArgs& a)
         try {
             entry = &registry.lookup(op);   // may throw ManifestFieldError
             entry->fn(state, step);
+        } catch (const ConfigBatchError& cbe) {
+            const auto& d = cbe.dispatched();
+            json data;
+            data["step"]        = step_index;
+            data["op"]          = op;
+            data["failing_key"] = cbe.failing_key();
+            std::ostringstream msg;
+            msg << "step " << step_index << " (op '" << op
+                << "', failing_key '" << cbe.failing_key() << "'): " << d.message;
+            emit_error(mode, d.code, msg.str(), data);
+            std::exit(d.exit_code);
         } catch (const std::exception& e) {
             auto d = exception_dispatch::dispatch(
                 e, entry ? entry->overrides : MutationExceptionMap{});
