@@ -413,10 +413,147 @@ membership.
 
 ---
 
+## Step 21: project apply -- 12-plate batch workflow (M12)
+
+The motivating M12 use case: build a multi-plate project in a single
+load/save cycle via a JSON manifest. This recipe adds 12 plates + 1
+cube per plate + 2 config keys in one call.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\01-12-plate"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$ops = @()
+1..12 | ForEach-Object { $ops += "{`"op`":`"plate.add`",`"name`":`"P$_`"}" }
+1..12 | ForEach-Object { $ops += "{`"op`":`"object.add`",`"plate`":`"P$_`",`"stl`":`"$cube`",`"name`":`"cube_P$_`"}" }
+$ops += '{"op":"config.set","values":{"layer_height":"0.2","line_width":"0.45"}}'
+$mf = "{`"version`":1,`"operations`":[$($ops -join ',')]}"
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":25` (12
+plate.add + 12 object.add + 1 config.set) and
+`"output":"$root\out.3mf"`.
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The plate
+selector should show **13 plates total** (the canonical "Plate 01 test"
+plus P1..P12). Switching through each P1..P12 plate should show one
+cube (`cube_P<N>`) centered on that plate. The Process / Print
+settings panel should show `layer_height = 0.2` and the line-width
+override applied.
+
+[ ] open-and-verify in Bambu Studio -- signed off ____
+
+---
+
+## Step 22: project apply -- object.add with translate transform (M12)
+
+Verifies the `parse_transform` integration: a manifest-specified
+`translate` lands the object at the right plate-local coordinates.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\02-object-add-tx"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$mf = "{`"version`":1,`"operations`":[{`"op`":`"object.add`",`"plate`":`"Plate 01 test`",`"stl`":`"$cube`",`"name`":`"cube_off_center`",`"translate`":{`"x`":80.0,`"y`":80.0}}]}"
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":1`.
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. On "Plate
+01 test" you should see a new object `cube_off_center` placed at
+plate-local (80, 80) — visibly off-centered toward the upper-right
+quadrant of the bed. The pre-existing reference object stays where it
+was. Z is dropped to bed.
+
+[ ] open-and-verify in Bambu Studio -- signed off ____
+
+---
+
+## Step 23: project apply -- plate.arrange via batch (M12)
+
+Adds a new plate, places 4 cubes on it (default placement), then runs
+`plate.arrange` — all in one manifest. Verifies the arrange step
+correctly lays out batch-added objects.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\03-plate-arrange"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$ops = @('{"op":"plate.add","name":"ArrangeTest"}')
+1..4 | ForEach-Object { $ops += "{`"op`":`"object.add`",`"plate`":`"ArrangeTest`",`"stl`":`"$cube`",`"name`":`"cube_arr_$_`"}" }
+$ops += '{"op":"plate.arrange","plate":"ArrangeTest"}'
+$mf = "{`"version`":1,`"operations`":[$($ops -join ',')]}"
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":6` (1
+plate.add + 4 object.add + 1 plate.arrange).
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The
+"ArrangeTest" plate should contain **4 cubes laid out without
+overlap**, nested compactly on the bed (typical 2×2 grid or
+arrangement-engine layout). All 4 must be fully on-bed. The
+canonical "Plate 01 test" remains unchanged.
+
+[ ] open-and-verify in Bambu Studio -- signed off ____
+
+---
+
+## Step 24: project apply -- mixed-ops batch (M12)
+
+The integration smoke: one manifest combining `plate.add` +
+`object.add` (with transforms) + `config.set` (batch shorthand) +
+`plate.arrange`. Verifies all four mutation classes compose correctly
+in a single load/save cycle.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\04-mixed"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$mf = @"
+{"version":1,"operations":[
+  {"op":"plate.add","name":"MixedPlate"},
+  {"op":"object.add","plate":"MixedPlate","stl":"$cube","name":"cube_mixed_1","translate":{"x":60,"y":60}},
+  {"op":"object.add","plate":"MixedPlate","stl":"$cube","name":"cube_mixed_2","translate":{"x":200,"y":200}},
+  {"op":"config.set","values":{"layer_height":"0.16","line_width":"0.5"}},
+  {"op":"plate.arrange","plate":"MixedPlate"}
+]}
+"@
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":5`.
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The
+"MixedPlate" plate should contain **2 cubes laid out without overlap**
+(after arrange compacted them from their initial translate positions).
+The Process / Print settings panel should show `layer_height = 0.16`
+and the line-width override. The canonical "Plate 01 test" remains
+unchanged.
+
+[ ] open-and-verify in Bambu Studio -- signed off ____
+
+---
+
 ## Cleanup
 
 ```powershell
 Remove-Item $out -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\bambu-m12-signoff" -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 ---
