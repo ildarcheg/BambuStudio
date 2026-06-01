@@ -63,3 +63,85 @@ TEST_CASE("parse_filament: zero or negative throws", "[apply_helpers][parse_fila
     REQUIRE_THROWS_AS(parse_filament(step1, "filament"), ManifestFieldError);
     REQUIRE_THROWS_AS(parse_filament(step2, "filament"), ManifestFieldError);
 }
+
+using bambu_cli::parse_transform;
+using bambu_cli::ManualTransform;
+
+TEST_CASE("parse_transform: empty step returns no flags set", "[apply_helpers][parse_transform]") {
+    json step = json::object();
+    ManualTransform t = parse_transform(step);
+    REQUIRE_FALSE(t.has_translate);
+    REQUIRE_FALSE(t.has_rotate);
+    REQUIRE_FALSE(t.has_scale);
+}
+
+TEST_CASE("parse_transform: translate object form", "[apply_helpers][parse_transform]") {
+    json step = {{"translate", {{"x", 10}, {"y", 20}}}};
+    ManualTransform t = parse_transform(step);
+    REQUIRE(t.has_translate);
+    REQUIRE(t.tx == Approx(10));
+    REQUIRE(t.ty == Approx(20));
+    REQUIRE(t.tz == Approx(0));   // default
+}
+
+TEST_CASE("parse_transform: rotate object form, degrees", "[apply_helpers][parse_transform]") {
+    json step = {{"rotate", {{"z", 90}}}};
+    ManualTransform t = parse_transform(step);
+    REQUIRE(t.has_rotate);
+    REQUIRE(t.rx == Approx(0));
+    REQUIRE(t.ry == Approx(0));
+    REQUIRE(t.rz == Approx(90));
+}
+
+TEST_CASE("parse_transform: scale per-axis", "[apply_helpers][parse_transform]") {
+    json step = {{"scale", {{"x", 1.5}, {"y", 1.0}, {"z", 1.0}}}};
+    ManualTransform t = parse_transform(step);
+    REQUIRE(t.has_scale);
+    REQUIRE(t.sx == Approx(1.5));
+    REQUIRE(t.sy == Approx(1.0));
+    REQUIRE(t.sz == Approx(1.0));
+}
+
+TEST_CASE("parse_transform: scale uniform numeric shorthand",
+          "[apply_helpers][parse_transform]") {
+    json step = {{"scale", 1.5}};
+    ManualTransform t = parse_transform(step);
+    REQUIRE(t.has_scale);
+    REQUIRE(t.sx == Approx(1.5));
+    REQUIRE(t.sy == Approx(1.5));
+    REQUIRE(t.sz == Approx(1.5));
+}
+
+TEST_CASE("parse_transform: empty section treated as not present",
+          "[apply_helpers][parse_transform]") {
+    json step = {{"translate", json::object()}};
+    ManualTransform t = parse_transform(step);
+    REQUIRE_FALSE(t.has_translate);
+}
+
+TEST_CASE("parse_transform: all three sections", "[apply_helpers][parse_transform]") {
+    json step = {
+        {"translate", {{"x", 1}, {"y", 2}, {"z", 3}}},
+        {"rotate",    {{"x", 10}, {"y", 20}, {"z", 30}}},
+        {"scale",     {{"x", 1.5}, {"y", 1.5}, {"z", 1.5}}},
+    };
+    ManualTransform t = parse_transform(step);
+    REQUIRE(t.has_translate);
+    REQUIRE(t.has_rotate);
+    REQUIRE(t.has_scale);
+    REQUIRE(t.tx == Approx(1));   REQUIRE(t.ty == Approx(2));   REQUIRE(t.tz == Approx(3));
+    REQUIRE(t.rx == Approx(10));  REQUIRE(t.ry == Approx(20));  REQUIRE(t.rz == Approx(30));
+    REQUIRE(t.sx == Approx(1.5)); REQUIRE(t.sy == Approx(1.5)); REQUIRE(t.sz == Approx(1.5));
+}
+
+TEST_CASE("parse_transform: unknown axis key throws",
+          "[apply_helpers][parse_transform]") {
+    json step = {{"translate", {{"q", 1}}}};
+    REQUIRE_THROWS_AS(parse_transform(step), ManifestFieldError);
+}
+
+TEST_CASE("parse_transform: translate as number throws",
+          "[apply_helpers][parse_transform]") {
+    json step = {{"translate", 5}};
+    REQUIRE_THROWS_AS(parse_transform(step), ManifestFieldError);
+}

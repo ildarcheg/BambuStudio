@@ -36,4 +36,60 @@ int parse_filament(const nlohmann::json& step, const char* key)
     return n;
 }
 
+namespace {
+
+// Apply a translate-style section ({"x":..,"y":..,"z":..} or empty) into
+// out_{x,y,z} using `default_v` for missing axes. Returns true if the
+// section was present and non-empty (caller flips the has_* flag).
+bool read_axis_object(const nlohmann::json& section,
+                      const char* section_name,
+                      double default_v,
+                      double& out_x, double& out_y, double& out_z)
+{
+    if (!section.is_object())
+        throw bambu_cli::ManifestFieldError(std::string("section '") + section_name +
+                                 "' must be an object");
+    if (section.empty()) return false;
+    out_x = out_y = out_z = default_v;
+    for (auto it = section.begin(); it != section.end(); ++it) {
+        const std::string& key = it.key();
+        if      (key == "x") out_x = it.value().get<double>();
+        else if (key == "y") out_y = it.value().get<double>();
+        else if (key == "z") out_z = it.value().get<double>();
+        else throw bambu_cli::ManifestFieldError(std::string("unknown axis key '") + key +
+                                      "' on '" + section_name + "'");
+    }
+    return true;
+}
+
+} // anonymous namespace
+
+ManualTransform parse_transform(const nlohmann::json& step)
+{
+    ManualTransform t;
+
+    if (step.contains("translate")) {
+        t.has_translate = read_axis_object(step["translate"], "translate",
+                                           0.0, t.tx, t.ty, t.tz);
+    }
+
+    if (step.contains("rotate")) {
+        t.has_rotate    = read_axis_object(step["rotate"], "rotate",
+                                           0.0, t.rx, t.ry, t.rz);
+    }
+
+    if (step.contains("scale")) {
+        const auto& s = step["scale"];
+        if (s.is_number()) {
+            double v = s.get<double>();
+            t.has_scale = true;
+            t.sx = t.sy = t.sz = v;
+        } else {
+            t.has_scale = read_axis_object(s, "scale", 1.0, t.sx, t.sy, t.sz);
+        }
+    }
+
+    return t;
+}
+
 } // namespace bambu_cli

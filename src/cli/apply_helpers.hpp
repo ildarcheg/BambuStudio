@@ -27,4 +27,13 @@ void require_only(const nlohmann::json& step,
 // Throws ManifestFieldError on any failure.
 int parse_filament(const nlohmann::json& step, const char* key);
 
+// Parse the translate/rotate/scale sections of an object.add step and
+// return a populated ManualTransform with the corresponding has_* flags.
+// Object form: {"x":N,"y":N,"z":N}, missing axes default to 0 (translate/
+// rotate) or 1 (scale). `scale` also accepts a bare number as uniform
+// shorthand. An empty section ({"translate": {}}) is treated as not
+// present (the flag stays false).
+// Throws ManifestFieldError on type mismatch or unknown axis key.
+ManualTransform parse_transform(const nlohmann::json& step);
+
 } // namespace bambu_cli
