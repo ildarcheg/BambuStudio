@@ -160,7 +160,12 @@ HandlerRegistry::HandlerRegistry()
             stl_p = fs::path(g_manifest_dir) / stl_p;
         stl_p = fs::weakly_canonical(stl_p);
 
-        std::string name      = step.value("name", std::string{});
+        std::string name;
+        if (step.contains("name")) {
+            if (!step["name"].is_string())
+                throw ManifestFieldError("object.add: 'name' must be a string");
+            name = step["name"].get<std::string>();
+        }
         int         filament  = step.contains("filament") ? parse_filament(step, "filament") : -1;
         int         count     = 1;
         if (step.contains("count")) {
@@ -197,7 +202,12 @@ HandlerRegistry::HandlerRegistry()
         if (!step.contains("name") || !step["name"].is_string())
             throw ManifestFieldError("object.set-filament: missing or non-string 'name'");
         int filament = parse_filament(step, "filament");
-        std::string part = step.value("part", std::string{});
+        std::string part;
+        if (step.contains("part")) {
+            if (!step["part"].is_string())
+                throw ManifestFieldError("object.set-filament: 'part' must be a string");
+            part = step["part"].get<std::string>();
+        }
         set_object_filament(s, step["name"].get<std::string>(), filament, part);
     };
 
@@ -248,7 +258,12 @@ HandlerRegistry::HandlerRegistry()
     // ---- config.set ----
     m_handlers["config.set"].fn = [](ProjectState& s, const json& step) {
         require_only(step, {"op", "object", "key", "value", "values"});
-        std::string object_name = step.value("object", std::string{});
+        std::string object_name;
+        if (step.contains("object")) {
+            if (!step["object"].is_string())
+                throw ManifestFieldError("config.set: 'object' must be a string");
+            object_name = step["object"].get<std::string>();
+        }
 
         const bool has_single = step.contains("key") || step.contains("value");
         const bool has_batch  = step.contains("values");
@@ -289,7 +304,12 @@ HandlerRegistry::HandlerRegistry()
     // ---- config.unset ----
     m_handlers["config.unset"].fn = [](ProjectState& s, const json& step) {
         require_only(step, {"op", "object", "key", "keys"});
-        std::string object_name = step.value("object", std::string{});
+        std::string object_name;
+        if (step.contains("object")) {
+            if (!step["object"].is_string())
+                throw ManifestFieldError("config.unset: 'object' must be a string");
+            object_name = step["object"].get<std::string>();
+        }
 
         const bool has_single = step.contains("key");
         const bool has_batch  = step.contains("keys");

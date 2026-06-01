@@ -475,11 +475,15 @@ TEST_CASE("object.auto-orient: entry carries runtime_error -> exit 7 override",
 
 // ---------- object.split-to-parts tests ----------
 
-TEST_CASE("object.split-to-parts: handler accepts well-formed args",
-          "[project_apply][object.split-to-parts]") {
+TEST_CASE("object.split-to-parts: handler reaches project_ops on valid shape",
+          "[project_apply][object.split-to-parts][functional]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
     HandlerRegistry reg;
-    const auto& entry = reg.lookup("object.split-to-parts");
-    REQUIRE(entry.fn);   // handler exists
+    // Valid schema, but non-existent target name -> project_ops throws
+    // std::out_of_range (proving the handler did NOT short-circuit on
+    // schema and DID call into project_ops).
+    json step = {{"op","object.split-to-parts"}, {"name","no_such_object_for_split"}};
+    REQUIRE_THROWS_AS(reg.lookup("object.split-to-parts").fn(s, step), std::out_of_range);
 }
 
 TEST_CASE("object.split-to-parts: missing name throws",
@@ -688,4 +692,68 @@ TEST_CASE("config.unset keys: failing key surfaces in ConfigBatchError",
     } catch (const bambu_cli::ConfigBatchError& e) {
         REQUIRE(e.failing_key() == "definitely_not_a_real_key");
     }
+}
+
+// ---------- object.merge-parts functional test ----------
+
+TEST_CASE("object.merge-parts: handler reaches project_ops on valid shape",
+          "[project_apply][object.merge-parts][functional]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    // Valid schema with all required fields; non-existent target name ->
+    // project_ops throws std::out_of_range.
+    json step = {
+        {"op","object.merge-parts"},
+        {"name","no_such_object_for_merge"},
+        {"parts", json::array({"vol_a","vol_b"})},
+        {"into","merged"}
+    };
+    REQUIRE_THROWS_AS(reg.lookup("object.merge-parts").fn(s, step), std::out_of_range);
+}
+
+// ---------- Issue 1: optional string field type-error tests ----------
+
+TEST_CASE("object.add: non-string name throws ManifestFieldError",
+          "[project_apply][object.add][types]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op", "object.add"},
+        {"plate", "Plate 01 test"},
+        {"stl", bambu_cli_unit::fixture_stl("cube.stl")},
+        {"name", 42}      // <- non-string, must reject
+    };
+    REQUIRE_THROWS_AS(reg.lookup("object.add").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.set-filament: non-string part throws ManifestFieldError",
+          "[project_apply][object.set-filament][types]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op", "object.set-filament"}, {"name", "X"},
+        {"filament", 2}, {"part", 42}
+    };
+    REQUIRE_THROWS_AS(reg.lookup("object.set-filament").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.set: non-string object throws ManifestFieldError",
+          "[project_apply][config.set][types]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","config.set"}, {"object", 42},
+        {"key","layer_height"}, {"value","0.2"}
+    };
+    REQUIRE_THROWS_AS(reg.lookup("config.set").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.unset: non-string object throws ManifestFieldError",
+          "[project_apply][config.unset][types]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","config.unset"}, {"object", 42}, {"key","layer_height"}
+    };
+    REQUIRE_THROWS_AS(reg.lookup("config.unset").fn(s, step), ManifestFieldError);
 }
