@@ -26,6 +26,7 @@
 //
 // No callback that uses run_mutation needs to call std::exit directly.
 
+#include "../exception_dispatch.hpp"
 #include "../exceptions.hpp"
 #include "../exit_codes.hpp"
 #include "../io.hpp"
@@ -75,52 +76,9 @@ void run_mutation(OutputMode mode,
     try {
         success_msg = mut(state);
     } catch (const std::exception& e) {
-        // 1. Per-call-site override map (exact dynamic type match).
-        auto it = overrides.find(std::type_index(typeid(e)));
-        if (it != overrides.end()) {
-            emit_error(mode, it->second.second, e.what());
-            std::exit(it->second.first);
-        }
-        // 2. Built-in typed-exception defaults via dynamic_cast (handles
-        //    derived classes). Order matters: typed subclasses of
-        //    std::runtime_error must precede the runtime_error catch-all
-        //    at the bottom.
-        if (dynamic_cast<const PlacementFailure*>(&e)) {
-            emit_error(mode, "placement_failure", e.what());
-            std::exit(to_int(ExitCode::placement_failure));
-        }
-        if (dynamic_cast<const BadConfigError*>(&e)) {
-            emit_error(mode, "bad_config", e.what());
-            std::exit(to_int(ExitCode::bad_config));
-        }
-        if (dynamic_cast<const DuplicateNameError*>(&e)) {
-            emit_error(mode, "duplicate_name", e.what());
-            std::exit(to_int(ExitCode::duplicate_name));
-        }
-        if (dynamic_cast<const FileNotFoundError*>(&e)) {
-            emit_error(mode, "file_not_found", e.what());
-            std::exit(to_int(ExitCode::file_not_found));
-        }
-        if (dynamic_cast<const InvariantViolation*>(&e)) {
-            emit_error(mode, "invariant_violation", e.what());
-            std::exit(to_int(ExitCode::invariant_violation));
-        }
-        // std::invalid_argument and std::out_of_range derive from
-        // std::logic_error, NOT std::runtime_error, so they don't
-        // collide with the catch-all below.
-        if (dynamic_cast<const std::invalid_argument*>(&e)) {
-            emit_error(mode, "usage_error", e.what());
-            std::exit(to_int(ExitCode::usage_error));
-        }
-        if (dynamic_cast<const std::out_of_range*>(&e)) {
-            emit_error(mode, "unknown_reference", e.what());
-            std::exit(to_int(ExitCode::unknown_reference));
-        }
-        // Catch-all (std::runtime_error and any other std::exception
-        // subclass): treated as parse_failure, matching the historical
-        // OpResult exit code for STL parse failures in add_object_to_plate.
-        emit_error(mode, "parse_failure", e.what());
-        std::exit(to_int(ExitCode::parse_failure));
+        auto d = bambu_cli::exception_dispatch::dispatch(e, overrides);
+        emit_error(mode, d.code, d.message);
+        std::exit(d.exit_code);
     }
 
     const std::string& out = out_path.empty() ? in_path : out_path;
