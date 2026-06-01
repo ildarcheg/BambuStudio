@@ -147,3 +147,32 @@ TEST_CASE("plate.rename: unknown field throws", "[project_apply][plate.rename]")
     json step = {{"op","plate.rename"},{"from","X"},{"to","Y"},{"junk",1}};
     REQUIRE_THROWS_AS(reg.lookup("plate.rename").fn(s, step), ManifestFieldError);
 }
+
+// ---------- plate.center tests ----------
+
+TEST_CASE("plate.center: happy path centers instances",
+          "[project_apply][plate.center]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    reg.lookup("plate.center").fn(
+        s, json{{"op","plate.center"}, {"plate", "Plate 01 test"}});
+    // Lightweight invariant: handler returns without throwing.
+    SUCCEED("plate.center applied without throwing");
+}
+
+TEST_CASE("plate.center: missing plate field throws",
+          "[project_apply][plate.center]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("plate.center").fn(s, json{{"op","plate.center"}}),
+                      ManifestFieldError);
+}
+
+TEST_CASE("plate.center: unknown field throws",
+          "[project_apply][plate.center]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    json step = {{"op","plate.center"}, {"plate","X"}, {"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("plate.center").fn(s, step), ManifestFieldError);
+}

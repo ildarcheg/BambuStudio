@@ -107,6 +107,13 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("plate.rename: missing or non-string 'to'");
         rename_plate(s, step["from"].get<std::string>(), step["to"].get<std::string>());
     };
+
+    m_handlers["plate.center"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "plate"});
+        if (!step.contains("plate") || !step["plate"].is_string())
+            throw ManifestFieldError("plate.center: missing or non-string 'plate'");
+        plate_center(s, step["plate"].get<std::string>());
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
