@@ -34,3 +34,32 @@ TEST_CASE("require_only: empty step accepted regardless of known list",
     json step = json::object();
     REQUIRE_NOTHROW(require_only(step, {"op", "name"}));
 }
+
+using bambu_cli::parse_filament;
+
+TEST_CASE("parse_filament: returns the integer when present", "[apply_helpers][parse_filament]") {
+    json step = {{"filament", 2}};
+    REQUIRE(parse_filament(step, "filament") == 2);
+}
+
+TEST_CASE("parse_filament: missing field throws", "[apply_helpers][parse_filament]") {
+    json step = json::object();
+    REQUIRE_THROWS_AS(parse_filament(step, "filament"), ManifestFieldError);
+}
+
+TEST_CASE("parse_filament: string-shaped value throws", "[apply_helpers][parse_filament]") {
+    json step = {{"filament", "2"}};
+    REQUIRE_THROWS_AS(parse_filament(step, "filament"), ManifestFieldError);
+}
+
+TEST_CASE("parse_filament: float value throws", "[apply_helpers][parse_filament]") {
+    json step = {{"filament", 2.5}};
+    REQUIRE_THROWS_AS(parse_filament(step, "filament"), ManifestFieldError);
+}
+
+TEST_CASE("parse_filament: zero or negative throws", "[apply_helpers][parse_filament]") {
+    json step1 = {{"filament", 0}};
+    json step2 = {{"filament", -1}};
+    REQUIRE_THROWS_AS(parse_filament(step1, "filament"), ManifestFieldError);
+    REQUIRE_THROWS_AS(parse_filament(step2, "filament"), ManifestFieldError);
+}

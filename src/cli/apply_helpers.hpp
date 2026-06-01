@@ -22,4 +22,9 @@ namespace bambu_cli {
 void require_only(const nlohmann::json& step,
                   std::initializer_list<const char*> known_keys);
 
+// Return step[key] as an integer, validating that it is present, an
+// integer (not float, not string), and >= 1 (1-based filament slot).
+// Throws ManifestFieldError on any failure.
+int parse_filament(const nlohmann::json& step, const char* key);
+
 } // namespace bambu_cli

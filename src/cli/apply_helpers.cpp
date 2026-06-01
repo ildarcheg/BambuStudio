@@ -21,4 +21,19 @@ void require_only(const nlohmann::json& step,
     }
 }
 
+int parse_filament(const nlohmann::json& step, const char* key)
+{
+    if (!step.contains(key))
+        throw ManifestFieldError(std::string("missing required field '") + key + "'");
+    const auto& v = step[key];
+    if (!v.is_number_integer())
+        throw ManifestFieldError(std::string("field '") + key +
+                                 "' must be an integer (1-based filament slot)");
+    int n = v.get<int>();
+    if (n < 1)
+        throw ManifestFieldError(std::string("field '") + key +
+                                 "' must be >= 1 (got " + std::to_string(n) + ")");
+    return n;
+}
+
 } // namespace bambu_cli
