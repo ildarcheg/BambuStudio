@@ -116,3 +116,34 @@ TEST_CASE("plate.remove: non-string name throws", "[project_apply][plate.remove]
     json step = {{"op", "plate.remove"}, {"name", 42}};
     REQUIRE_THROWS_AS(reg.lookup("plate.remove").fn(s, step), ManifestFieldError);
 }
+
+// ---------- plate.rename tests ----------
+
+TEST_CASE("plate.rename: happy path renames", "[project_apply][plate.rename]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    bambu_cli::add_plate(s, "P2");
+    HandlerRegistry reg;
+    reg.lookup("plate.rename").fn(s, json{{"op","plate.rename"}, {"from","P2"}, {"to","P-NEW"}});
+    auto names = bambu_cli::list_plate_names(s);
+    REQUIRE(std::find(names.begin(), names.end(), "P-NEW") != names.end());
+    REQUIRE(std::find(names.begin(), names.end(), "P2")    == names.end());
+}
+
+TEST_CASE("plate.rename: missing from throws", "[project_apply][plate.rename]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("plate.rename").fn(s, json{{"op","plate.rename"},{"to","X"}}), ManifestFieldError);
+}
+
+TEST_CASE("plate.rename: missing to throws", "[project_apply][plate.rename]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("plate.rename").fn(s, json{{"op","plate.rename"},{"from","X"}}), ManifestFieldError);
+}
+
+TEST_CASE("plate.rename: unknown field throws", "[project_apply][plate.rename]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    json step = {{"op","plate.rename"},{"from","X"},{"to","Y"},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("plate.rename").fn(s, step), ManifestFieldError);
+}

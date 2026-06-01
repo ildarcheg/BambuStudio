@@ -98,6 +98,15 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("plate.remove: missing or non-string 'name'");
         remove_plate(s, step["name"].get<std::string>());
     };
+
+    m_handlers["plate.rename"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "from", "to"});
+        if (!step.contains("from") || !step["from"].is_string())
+            throw ManifestFieldError("plate.rename: missing or non-string 'from'");
+        if (!step.contains("to") || !step["to"].is_string())
+            throw ManifestFieldError("plate.rename: missing or non-string 'to'");
+        rename_plate(s, step["from"].get<std::string>(), step["to"].get<std::string>());
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
