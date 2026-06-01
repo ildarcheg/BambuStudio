@@ -26,6 +26,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_project_profile.cpp
     e2e/test_project_aux.cpp
     e2e/test_thumbnail_passthrough.cpp
+    e2e/test_project_apply.cpp
     # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
     unit/test_project_ops_plates.cpp
