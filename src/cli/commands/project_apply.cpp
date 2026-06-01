@@ -91,6 +91,13 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("plate.add: 'name' must be a string");
         add_plate(s, step["name"].get<std::string>());
     };
+
+    m_handlers["plate.remove"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name"});
+        if (!step.contains("name") || !step["name"].is_string())
+            throw ManifestFieldError("plate.remove: missing or non-string 'name'");
+        remove_plate(s, step["name"].get<std::string>());
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
