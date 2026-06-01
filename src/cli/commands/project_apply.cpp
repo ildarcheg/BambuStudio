@@ -220,6 +220,30 @@ HandlerRegistry::HandlerRegistry()
     m_handlers["object.split-to-parts"].overrides = {
         { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
     };
+
+    m_handlers["object.merge-parts"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name", "parts", "into", "filament"});
+        if (!step.contains("name") || !step["name"].is_string())
+            throw ManifestFieldError("object.merge-parts: missing or non-string 'name'");
+        if (!step.contains("parts") || !step["parts"].is_array() || step["parts"].empty())
+            throw ManifestFieldError("object.merge-parts: 'parts' must be a non-empty array of strings");
+        if (!step.contains("into") || !step["into"].is_string())
+            throw ManifestFieldError("object.merge-parts: missing or non-string 'into'");
+
+        MergePartsParams p;
+        for (const auto& v : step["parts"]) {
+            if (!v.is_string())
+                throw ManifestFieldError("object.merge-parts: 'parts' entry must be a string");
+            p.parts.push_back(v.get<std::string>());
+        }
+        p.into     = step["into"].get<std::string>();
+        p.filament = step.contains("filament") ? parse_filament(step, "filament") : -1;
+
+        merge_object_parts(s, step["name"].get<std::string>(), p);
+    };
+    m_handlers["object.merge-parts"].overrides = {
+        { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const

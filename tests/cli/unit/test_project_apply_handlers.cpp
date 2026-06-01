@@ -506,3 +506,49 @@ TEST_CASE("object.split-to-parts: entry carries invalid_argument -> exit 7 overr
     REQUIRE(it != entry.overrides.end());
     REQUIRE(it->second.first == 7);
 }
+
+// ---------- object.merge-parts tests ----------
+
+TEST_CASE("object.merge-parts: missing parts throws",
+          "[project_apply][object.merge-parts]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.merge-parts"},{"name","X"},{"into","Y"}};
+    REQUIRE_THROWS_AS(reg.lookup("object.merge-parts").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.merge-parts: empty parts array throws",
+          "[project_apply][object.merge-parts]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.merge-parts"},{"name","X"},
+                 {"parts", json::array()},{"into","Y"}};
+    REQUIRE_THROWS_AS(reg.lookup("object.merge-parts").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.merge-parts: missing into throws",
+          "[project_apply][object.merge-parts]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.merge-parts"},{"name","X"},
+                 {"parts", json::array({"a","b"})}};
+    REQUIRE_THROWS_AS(reg.lookup("object.merge-parts").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.merge-parts: unknown field throws",
+          "[project_apply][object.merge-parts]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.merge-parts"},{"name","X"},
+                 {"parts", json::array({"a","b"})},{"into","Y"},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("object.merge-parts").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.merge-parts: entry carries invalid_argument -> exit 7 override",
+          "[project_apply][object.merge-parts][overrides]") {
+    HandlerRegistry reg;
+    const auto& entry = reg.lookup("object.merge-parts");
+    auto it = entry.overrides.find(std::type_index(typeid(std::invalid_argument)));
+    REQUIRE(it != entry.overrides.end());
+    REQUIRE(it->second.first == 7);
+}
