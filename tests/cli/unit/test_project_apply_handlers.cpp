@@ -271,3 +271,64 @@ TEST_CASE("plate.auto-orient: handler entry carries runtime_error -> exit 7 over
     REQUIRE(it->second.first  == 7);
     REQUIRE(it->second.second == "invalid_state");
 }
+
+// ---------- object.add tests ----------
+
+TEST_CASE("object.add: happy path adds an object to the named plate",
+          "[project_apply][object.add]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op", "object.add"},
+        {"plate", "Plate 01 test"},
+        {"stl",   bambu_cli_unit::fixture_stl("cube.stl")},
+        {"name",  "test_cube_via_apply"},
+    };
+    REQUIRE_NOTHROW(reg.lookup("object.add").fn(s, step));
+    auto objs = bambu_cli::list_objects(s, "Plate 01 test");
+    bool found = false;
+    for (const auto& o : objs)
+        if (o.object_name == "test_cube_via_apply") { found = true; break; }
+    REQUIRE(found);
+}
+
+TEST_CASE("object.add: missing stl throws", "[project_apply][object.add]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.add"}, {"plate","Plate 01 test"}};
+    REQUIRE_THROWS_AS(reg.lookup("object.add").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.add: missing plate throws", "[project_apply][object.add]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.add"}, {"stl", bambu_cli_unit::fixture_stl("cube.stl")}};
+    REQUIRE_THROWS_AS(reg.lookup("object.add").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.add: unknown field throws", "[project_apply][object.add]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","object.add"}, {"plate","Plate 01 test"},
+        {"stl", bambu_cli_unit::fixture_stl("cube.stl")}, {"junk", 1}};
+    REQUIRE_THROWS_AS(reg.lookup("object.add").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.add: applies translate from object form",
+          "[project_apply][object.add]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","object.add"}, {"plate","Plate 01 test"},
+        {"stl", bambu_cli_unit::fixture_stl("cube.stl")},
+        {"name", "tx_cube"},
+        {"translate", {{"x", 128.0}, {"y", 128.0}}}
+    };
+    REQUIRE_NOTHROW(reg.lookup("object.add").fn(s, step));
+    // The semantic-correctness assertion (object instance offset == 25/0/0)
+    // is covered by tests/cli/unit/test_project_ops_objects.cpp at the
+    // project_ops layer; here we only assert the handler wired the
+    // transform through without throwing.
+}

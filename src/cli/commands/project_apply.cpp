@@ -78,6 +78,12 @@ void parse_and_validate_manifest(const json& m)
     }
 }
 
+// ---------- manifest directory for object.add ----------
+
+// Per-call manifest directory, set by run_apply before dispatch and read
+// by object.add. Thread-local so future parallel invocations remain safe.
+static thread_local std::string g_manifest_dir;
+
 // ---------- handler registry ----------
 
 HandlerRegistry::HandlerRegistry()
@@ -137,6 +143,46 @@ HandlerRegistry::HandlerRegistry()
     };
     m_handlers["plate.auto-orient"].overrides = {
         { std::type_index(typeid(std::runtime_error)), {7, "invalid_state"} },
+    };
+
+    // ---------- object ops ----------
+    m_handlers["object.add"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "plate", "stl", "name",
+                            "filament", "count", "translate", "rotate", "scale"});
+        if (!step.contains("plate") || !step["plate"].is_string())
+            throw ManifestFieldError("object.add: missing or non-string 'plate'");
+        if (!step.contains("stl") || !step["stl"].is_string())
+            throw ManifestFieldError("object.add: missing or non-string 'stl'");
+
+        // STL path resolution: JSON-relative.
+        fs::path stl_p = step["stl"].get<std::string>();
+        if (!stl_p.is_absolute() && !g_manifest_dir.empty())
+            stl_p = fs::path(g_manifest_dir) / stl_p;
+        stl_p = fs::weakly_canonical(stl_p);
+
+        std::string name      = step.value("name", std::string{});
+        int         filament  = step.contains("filament") ? parse_filament(step, "filament") : -1;
+        int         count     = 1;
+        if (step.contains("count")) {
+            if (!step["count"].is_number_integer())
+                throw ManifestFieldError("object.add: 'count' must be an integer");
+            count = step["count"].get<int>();
+            if (count < 1)
+                throw ManifestFieldError("object.add: 'count' must be >= 1");
+        }
+
+        ManualTransform tf = parse_transform(step);
+        const ManualTransform* tf_ptr =
+            (tf.has_translate || tf.has_rotate || tf.has_scale) ? &tf : nullptr;
+
+        add_object_to_plate(s,
+                            step["plate"].get<std::string>(),
+                            stl_p.string(),
+                            name,
+                            filament,
+                            tf_ptr,
+                            count,
+                            nullptr);
     };
 }
 
@@ -218,6 +264,9 @@ static void run_apply(OutputMode mode, const ApplyArgs& a)
         emit_error(mode, d.code, d.message);
         std::exit(d.exit_code);
     }
+
+    // Stage 3b: capture manifest directory for object.add STL path resolution.
+    g_manifest_dir = fs::path(a.manifest_path).parent_path().string();
 
     // Stage 4: load the .3mf.
     ProjectState state;
