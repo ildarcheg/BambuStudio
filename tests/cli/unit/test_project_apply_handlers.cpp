@@ -428,3 +428,46 @@ TEST_CASE("object.set-filament: unknown field throws",
     json step = {{"op","object.set-filament"},{"name","X"},{"filament",2},{"junk",1}};
     REQUIRE_THROWS_AS(reg.lookup("object.set-filament").fn(s, step), ManifestFieldError);
 }
+
+// ---------- object.auto-orient tests ----------
+
+TEST_CASE("object.auto-orient: happy path orients all clones",
+          "[project_apply][object.auto-orient]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    // Add an object first since list_objects doesn't surface loaded ones.
+    HandlerRegistry reg;
+    reg.lookup("object.add").fn(s, json{
+        {"op","object.add"}, {"plate","Plate 01 test"},
+        {"stl", bambu_cli_unit::fixture_stl("cube.stl")},
+        {"name","orient_target"}
+    });
+    REQUIRE_NOTHROW(reg.lookup("object.auto-orient").fn(s,
+        json{{"op","object.auto-orient"},{"name","orient_target"}}));
+}
+
+TEST_CASE("object.auto-orient: missing name throws",
+          "[project_apply][object.auto-orient]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("object.auto-orient").fn(s,
+        json{{"op","object.auto-orient"}}),
+        ManifestFieldError);
+}
+
+TEST_CASE("object.auto-orient: unknown field throws",
+          "[project_apply][object.auto-orient]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.auto-orient"},{"name","X"},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("object.auto-orient").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.auto-orient: entry carries runtime_error -> exit 7 override",
+          "[project_apply][object.auto-orient][overrides]") {
+    HandlerRegistry reg;
+    const auto& entry = reg.lookup("object.auto-orient");
+    auto it = entry.overrides.find(std::type_index(typeid(std::runtime_error)));
+    REQUIRE(it != entry.overrides.end());
+    REQUIRE(it->second.first == 7);
+    REQUIRE(it->second.second == "invalid_state");
+}

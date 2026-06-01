@@ -200,6 +200,16 @@ HandlerRegistry::HandlerRegistry()
         std::string part = step.value("part", std::string{});
         set_object_filament(s, step["name"].get<std::string>(), filament, part);
     };
+
+    m_handlers["object.auto-orient"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name"});
+        if (!step.contains("name") || !step["name"].is_string())
+            throw ManifestFieldError("object.auto-orient: missing or non-string 'name'");
+        object_auto_orient(s, step["name"].get<std::string>());
+    };
+    m_handlers["object.auto-orient"].overrides = {
+        { std::type_index(typeid(std::runtime_error)), {7, "invalid_state"} },
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
