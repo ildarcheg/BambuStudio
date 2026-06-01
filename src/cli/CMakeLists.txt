@@ -31,6 +31,7 @@ set(BAMBU_CLI_CORE_SOURCES
     stubs_for_libslic3r.cpp
     nanosvg_impl.cpp
     exception_dispatch.cpp
+    apply_helpers.cpp
     io.cpp
     invariant_guard.cpp
     json_output.cpp
