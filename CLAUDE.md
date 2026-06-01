@@ -26,6 +26,15 @@ roundtrip). Link surface is deliberately narrowed via
 `update_selected_items_inflation` + `get_shrink_bedpts`
 (`src/libslic3r/Arrange.hpp`) and `orientation::orient`
 (`src/libslic3r/Orient.hpp`); no new `libslic3r_gui` link surface.
+The `project apply` batch-manifest verb (M12) dispatches a JSON
+manifest of mutations against the same `project_ops` functions in a
+single load/save cycle via a `HandlerRegistry` of
+`HandlerEntry{ fn, overrides }` (one entry per op). Schema-shape
+errors throw `ManifestFieldError` (a `std::invalid_argument`
+subclass) which `exception_dispatch::dispatch` short-circuits to
+exit 1 *before* the per-op override lookup, so manifest typos can't
+be misclassified as `invalid_state` on verbs (split-to-parts,
+merge-parts) whose overrides remap `invalid_argument` to exit 7.
 
 ## Sibling-fork divergences — LEGITIMATE, do not try to "fix"
 - **Profile storage:** Bambu reads `model.profile_info` directly via
@@ -53,19 +62,21 @@ roundtrip). Link surface is deliberately narrowed via
 `.bak`-swap atomic save originated in OrcaSlicer M11 — Bambu ported it
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
-## Branch state (as of 2026-05-31)
-- `master` HEAD: `562fdd5ab` (merge of `worktree-cli-layout-ops-m11`
-  into master — M11 layout ops). Up to date with `origin/master` —
-  already pushed (0/0 ahead/behind).
+## Branch state (as of 2026-06-01)
+- `master` HEAD: `31529bf6e` (merge of `worktree-cli-project-apply-m12`
+  — M12 batch-manifest verb). **33 commits ahead of `origin/master`**;
+  not pushed yet.
+- M12 range: `029c51e85..7777688ab` (28 commits — 27 plan tasks + 1
+  polish fix). M11 merge is `562fdd5ab` on the same line of history.
 - `cross-project-convergence` branch retained at `90fbbbf7e` (the prior
   convergence HEAD).
 - Convergence range: `65ecc50d9..90fbbbf7e` (Round 1: roundtrip tests,
   cover-image refcount, identify_id pin, project-init staging-copy
   TOCTOU. Round 2: `plate_world_origin` total-count fix, stubs
   investigation kept-with-rationale).
-- Last `cli_tests` run: 331 cases / 4032 assertions, all green
-  (post-M11, includes the new layout-ops roundtrip coverage). To
-  build/run the tests on macOS, reconfigure with
+- Last `cli_tests` run: 447 cases / 4271 assertions, all green
+  (post-M12, +116 cases / +239 assertions vs M11). To build/run the
+  tests on macOS, reconfigure with
   `-DSLIC3R_BUILD_TESTS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5` (the
   default `BuildMac.sh` configures tests OFF); see
   `tests/cli/cli_tests_main.cpp` for the macOS temp-dir harness fix.
@@ -75,9 +86,15 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 - `src/cli/` — entry (`main.cpp`), `io.{hpp,cpp}`,
   `project_ops.{hpp,cpp}`, `project_tab_ops.{hpp,cpp}`,
   `invariant_guard.{hpp,cpp}`, `png_placeholder.{hpp,cpp}`,
-  `json_output.{hpp,cpp}`, `exit_codes.hpp`, `exceptions.hpp`,
+  `json_output.{hpp,cpp}`, `exception_dispatch.{hpp,cpp}` (M12 — shared
+  exception → exit-code dispatch with `ManifestFieldError` short-
+  circuit), `apply_helpers.{hpp,cpp}` (M12 — `require_only` +
+  `parse_filament` + `parse_transform` + `ConfigBatchError`),
+  `exit_codes.hpp`, `exceptions.hpp` (includes `ManifestFieldError`),
   `stubs_for_libslic3r.cpp`, `nanosvg_impl.cpp`, `commands/` (one TU per
-  top-level verb), `extern/CLI11/CLI11.hpp` vendored.
+  top-level verb; `commands/project_apply.cpp` +
+  `commands/project_apply_internal.hpp` host the M12
+  `HandlerRegistry`), `extern/CLI11/CLI11.hpp` vendored.
 - `tests/cli/` — `unit/`, `e2e/`, `roundtrip/` (populated by Round 1 —
   7 ported test files, `.gitkeep` removed); fixtures in
   `tests/cli/fixtures/local/` + `tests/cli/fixtures/stls/`.
@@ -89,9 +106,11 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
   their work landed via the Phase A–F and convergence commits.
 
 ## Open items (carryover, not regressions)
-- `docs/cli/status.md` manual GUI smoke gates still `[ ]` for M1–M10
-  and Phases B/C/D — none of the produced 3MFs have been signed off by
-  opening in Bambu Studio.
+- `docs/cli/status.md` manual GUI smoke gates still `[ ]` for M1–M10,
+  Phases B/C/D, and **M12** — none of the produced 3MFs have been
+  signed off by opening in Bambu Studio. M11 is the one signed-off
+  milestone (2026-05-30).
+- Master is **33 commits ahead of `origin/master`** — push when ready.
 - `bambu-cli --verbose` is parsed but a no-op (intentional deferral —
   see Phase F.1 entry in `status.md`).
 - No `install(TARGETS bambu-cli)` — ships from `build/` only
@@ -108,6 +127,10 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
   stubs-removal investigation outcome).
 - `docs/cli/notes/2026-05-21-bbs-profile-storage.md` — why Bambu's
   profile storage differs from Orca's.
-- `docs/cli/status.md` — milestone-by-milestone status (M0..M10 +
+- `docs/cli/status.md` — milestone-by-milestone status (M0..M12 +
   Phases A..F + convergence).
 - `docs/cli/manual-test.md` — 383-line manual GUI smoke recipe.
+- `docs/superpowers/specs/2026-05-31-project-apply-batch-design.md` —
+  M12 spec (1001 lines).
+- `docs/superpowers/plans/2026-05-31-project-apply-batch.md` —
+  M12 27-task TDD plan (2699 lines).

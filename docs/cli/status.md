@@ -591,3 +591,33 @@ objects** (the group matched by `--name`) receive the extruder stamp. Throws
 Spec: `docs/superpowers/specs/2026-05-29-arrange-center-drop-orient-design.md`
 Plan: `docs/superpowers/plans/2026-05-29-arrange-center-drop-orient.md`
 Notes: `docs/cli/notes/2026-05-29-drop-to-bed-hull-vs-mesh.md`
+
+## M12 — `project apply` batch-manifest verb (2026-06-01)
+
+- [x] `project apply <in.3mf> --manifest m.json [--output out.3mf] [--dry-run]` registered as a `project`-subcommand
+- [x] Manifest schema: `{"version":1,"operations":[{"op":...,...args}]}`; strict unknown-key/unknown-field rejection; 10,000-op cap
+- [x] 14 mutating-verb handlers via `HandlerRegistry`/`HandlerEntry` (one entry per op):
+  - `plate.add` / `plate.remove` / `plate.rename`
+  - `plate.center` / `plate.drop-to-bed` / `plate.arrange` / `plate.auto-orient` (override `runtime_error → exit 7`)
+  - `object.add` / `object.remove` / `object.set-filament`
+  - `object.auto-orient` (override `runtime_error → exit 7`)
+  - `object.split-to-parts` (override `invalid_argument → exit 7`)
+  - `object.merge-parts` (override `invalid_argument → exit 7`)
+  - `config.set` / `config.unset` (single-key OR batch `values:` / `keys:` form, mutually exclusive)
+- [x] `ManifestFieldError` (subclass of `std::invalid_argument`) thrown by all schema validators; `exception_dispatch::dispatch` short-circuits it to exit 1 BEFORE the per-op `MutationExceptionMap` lookup, so manifest typos can't be misclassified as `invalid_state` on the four exit-7 verbs
+- [x] `--dry-run` runs stages 1–5 of the dispatch flow and skips `save_project` (one boolean guard at stage 6, no `ProjectState` deep-copy)
+- [x] `ConfigBatchError` carries `failing_key` context for mid-batch `config.set`/`config.unset` failures; surfaces in both the error message prefix and the `failing_key` field of the JSON error envelope
+- [x] STL paths in the manifest resolve relative to the manifest file's directory (thread-local `g_manifest_dir`)
+- [x] `exception_dispatch.{hpp,cpp}` refactor lifts the exception → exit-code table out of `commands/mutation_runner.hpp` (behaviour-preserving for every existing single-verb call site; 331 pre-existing tests stay green)
+- [x] `emit_error` extended with optional `data` blob (merges keys at top level; backwards-compatible default)
+- [x] Test coverage: +116 cases / +239 assertions (331/4032 → 447/4271). Breakdown:
+  - unit/test_apply_helpers.cpp — 18 cases (require_only / parse_filament / parse_transform)
+  - unit/test_apply_manifest.cpp — 11 cases (manifest header validation)
+  - unit/test_project_apply_handlers.cpp — 79 cases (per-handler happy + rejection + override-shape + ConfigBatchError + functional reach-through)
+  - e2e/test_project_apply.cpp — 12 cases (dry-run × 2, manifest × 4, schema-vs-semantic exit-7 × 5, 12-plate workflow × 1)
+  - roundtrip/test_apply_roundtrip.cpp — 3 cases (empty-manifest roundtrip, sequential-vs-batch equivalence, plus one consequence assertion)
+- [ ] Manual GUI sign-off — six smoke artifacts to produce + open in Bambu Studio (12-plate workflow, dry-run, schema-typo error envelope, config-batch failing_key error envelope, exit-7 semantic split, object.add via batch). Recipe TBD as steps 21+ of `docs/cli/manual-test.md`.
+
+Spec: `docs/superpowers/specs/2026-05-31-project-apply-batch-design.md`
+Plan: `docs/superpowers/plans/2026-05-31-project-apply-batch.md`
+Range: `029c51e85..7777688ab` (28 commits — 27 plan tasks + 1 polish fix `7777688ab` resolving final-review Issues 1 + 2 on optional-field type-checks and missing happy-path tests). Merge commit: `31529bf6e`.
