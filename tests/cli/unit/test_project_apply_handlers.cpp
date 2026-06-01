@@ -232,3 +232,42 @@ TEST_CASE("plate.arrange: unknown field throws",
     json step = {{"op","plate.arrange"}, {"plate","X"}, {"junk",1}};
     REQUIRE_THROWS_AS(reg.lookup("plate.arrange").fn(s, step), ManifestFieldError);
 }
+
+// ---------- plate.auto-orient tests ----------
+
+TEST_CASE("plate.auto-orient: happy path orients instances",
+          "[project_apply][plate.auto-orient]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    reg.lookup("plate.auto-orient").fn(
+        s, json{{"op","plate.auto-orient"}, {"plate", "Plate 01 test"}});
+    SUCCEED("plate.auto-orient applied without throwing");
+}
+
+TEST_CASE("plate.auto-orient: missing plate field throws",
+          "[project_apply][plate.auto-orient]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("plate.auto-orient").fn(s, json{{"op","plate.auto-orient"}}),
+                      ManifestFieldError);
+}
+
+TEST_CASE("plate.auto-orient: unknown field throws",
+          "[project_apply][plate.auto-orient]") {
+    ProjectState s; bambu_cli_unit::make_minimal_state(s, 1);
+    HandlerRegistry reg;
+    json step = {{"op","plate.auto-orient"}, {"plate","X"}, {"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("plate.auto-orient").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("plate.auto-orient: handler entry carries runtime_error -> exit 7 override",
+          "[project_apply][plate.auto-orient][overrides]") {
+    HandlerRegistry reg;
+    const auto& entry = reg.lookup("plate.auto-orient");
+    REQUIRE(entry.overrides.size() == 1);
+    auto it = entry.overrides.find(std::type_index(typeid(std::runtime_error)));
+    REQUIRE(it != entry.overrides.end());
+    REQUIRE(it->second.first  == 7);
+    REQUIRE(it->second.second == "invalid_state");
+}

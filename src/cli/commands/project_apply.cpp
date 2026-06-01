@@ -128,6 +128,16 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("plate.arrange: missing or non-string 'plate'");
         plate_arrange(s, step["plate"].get<std::string>());
     };
+
+    m_handlers["plate.auto-orient"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "plate"});
+        if (!step.contains("plate") || !step["plate"].is_string())
+            throw ManifestFieldError("plate.auto-orient: missing or non-string 'plate'");
+        plate_auto_orient(s, step["plate"].get<std::string>());
+    };
+    m_handlers["plate.auto-orient"].overrides = {
+        { std::type_index(typeid(std::runtime_error)), {7, "invalid_state"} },
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
