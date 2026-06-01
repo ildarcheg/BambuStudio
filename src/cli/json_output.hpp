@@ -20,9 +20,12 @@ void emit_ok(OutputMode mode, const std::string& code, const std::string& messag
              const nlohmann::json& data = nullptr);
 
 // Emit an "error" message to stderr.
-//   - text mode: "<code>: <message>" to stderr
-//   - json mode: {"status":"error","code":<code>,"message":<message>}  (still stderr)
-void emit_error(OutputMode mode, const std::string& code, const std::string& message);
+//   - text mode: "<code>: <message>" to stderr (data ignored)
+//   - json mode: {"status":"error","code":<code>,"message":<message>, ...<data>}
+// <data>, if non-null, is *merged* at the top level (each key becomes a
+// sibling of code/message/status). nullptr (default) omits the merge.
+void emit_error(OutputMode mode, const std::string& code, const std::string& message,
+                const nlohmann::json& data = nullptr);
 
 // emit_list_response<Row, ToJson, ToLine>:
 // Shared helper for list-style read-only subcommands (plate list, object list,
