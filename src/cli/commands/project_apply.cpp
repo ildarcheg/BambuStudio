@@ -210,6 +210,16 @@ HandlerRegistry::HandlerRegistry()
     m_handlers["object.auto-orient"].overrides = {
         { std::type_index(typeid(std::runtime_error)), {7, "invalid_state"} },
     };
+
+    m_handlers["object.split-to-parts"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "name"});
+        if (!step.contains("name") || !step["name"].is_string())
+            throw ManifestFieldError("object.split-to-parts: missing or non-string 'name'");
+        split_object_to_parts(s, step["name"].get<std::string>());
+    };
+    m_handlers["object.split-to-parts"].overrides = {
+        { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const

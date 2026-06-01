@@ -471,3 +471,38 @@ TEST_CASE("object.auto-orient: entry carries runtime_error -> exit 7 override",
     REQUIRE(it->second.first == 7);
     REQUIRE(it->second.second == "invalid_state");
 }
+
+// ---------- object.split-to-parts tests ----------
+
+TEST_CASE("object.split-to-parts: handler accepts well-formed args",
+          "[project_apply][object.split-to-parts]") {
+    HandlerRegistry reg;
+    const auto& entry = reg.lookup("object.split-to-parts");
+    REQUIRE(entry.fn);   // handler exists
+}
+
+TEST_CASE("object.split-to-parts: missing name throws",
+          "[project_apply][object.split-to-parts]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("object.split-to-parts").fn(s,
+        json{{"op","object.split-to-parts"}}),
+        ManifestFieldError);
+}
+
+TEST_CASE("object.split-to-parts: unknown field throws",
+          "[project_apply][object.split-to-parts]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","object.split-to-parts"},{"name","X"},{"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("object.split-to-parts").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("object.split-to-parts: entry carries invalid_argument -> exit 7 override",
+          "[project_apply][object.split-to-parts][overrides]") {
+    HandlerRegistry reg;
+    const auto& entry = reg.lookup("object.split-to-parts");
+    auto it = entry.overrides.find(std::type_index(typeid(std::invalid_argument)));
+    REQUIRE(it != entry.overrides.end());
+    REQUIRE(it->second.first == 7);
+}
