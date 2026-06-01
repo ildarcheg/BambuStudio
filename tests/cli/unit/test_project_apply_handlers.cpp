@@ -552,3 +552,53 @@ TEST_CASE("object.merge-parts: entry carries invalid_argument -> exit 7 override
     REQUIRE(it != entry.overrides.end());
     REQUIRE(it->second.first == 7);
 }
+
+// ---------- config.set tests ----------
+
+TEST_CASE("config.set: single key/value happy", "[project_apply][config.set]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","config.set"}, {"key","layer_height"}, {"value","0.2"}};
+    REQUIRE_NOTHROW(reg.lookup("config.set").fn(s, step));
+}
+
+TEST_CASE("config.set: values batch happy", "[project_apply][config.set]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","config.set"},
+        {"values", {{"layer_height","0.2"}, {"line_width","0.5"}}}
+    };
+    REQUIRE_NOTHROW(reg.lookup("config.set").fn(s, step));
+}
+
+TEST_CASE("config.set: both forms present rejected", "[project_apply][config.set]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {
+        {"op","config.set"}, {"key","layer_height"}, {"value","0.2"},
+        {"values", {{"line_width","0.5"}}}
+    };
+    REQUIRE_THROWS_AS(reg.lookup("config.set").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.set: neither form rejected", "[project_apply][config.set]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    REQUIRE_THROWS_AS(reg.lookup("config.set").fn(s, json{{"op","config.set"}}),
+                      ManifestFieldError);
+}
+
+TEST_CASE("config.set: unknown field rejected", "[project_apply][config.set]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","config.set"}, {"key","layer_height"}, {"value","0.2"}, {"junk",1}};
+    REQUIRE_THROWS_AS(reg.lookup("config.set").fn(s, step), ManifestFieldError);
+}
+
+TEST_CASE("config.set: empty values map rejected", "[project_apply][config.set]") {
+    ProjectState s; bambu_cli_unit::load_reference_into(s);
+    HandlerRegistry reg;
+    json step = {{"op","config.set"}, {"values", json::object()}};
+    REQUIRE_THROWS_AS(reg.lookup("config.set").fn(s, step), ManifestFieldError);
+}

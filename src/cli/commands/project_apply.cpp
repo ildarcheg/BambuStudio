@@ -244,6 +244,43 @@ HandlerRegistry::HandlerRegistry()
     m_handlers["object.merge-parts"].overrides = {
         { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
     };
+
+    // ---- config.set ----
+    m_handlers["config.set"].fn = [](ProjectState& s, const json& step) {
+        require_only(step, {"op", "object", "key", "value", "values"});
+        std::string object_name = step.value("object", std::string{});
+
+        const bool has_single = step.contains("key") || step.contains("value");
+        const bool has_batch  = step.contains("values");
+        if (has_single && has_batch)
+            throw ManifestFieldError("config.set: 'key'/'value' and 'values' are mutually exclusive");
+        if (!has_single && !has_batch)
+            throw ManifestFieldError("config.set: provide either 'key'+'value' or 'values'");
+
+        if (has_single) {
+            if (!step.contains("key") || !step["key"].is_string())
+                throw ManifestFieldError("config.set: missing or non-string 'key'");
+            if (!step.contains("value") || !step["value"].is_string())
+                throw ManifestFieldError("config.set: missing or non-string 'value'");
+            config_set(s, object_name,
+                       step["key"].get<std::string>(),
+                       step["value"].get<std::string>());
+            return;
+        }
+
+        // Batch form.
+        const auto& vs = step["values"];
+        if (!vs.is_object())
+            throw ManifestFieldError("config.set: 'values' must be an object");
+        if (vs.empty())
+            throw ManifestFieldError("config.set: 'values' must be non-empty");
+        for (auto it = vs.begin(); it != vs.end(); ++it) {
+            if (!it.value().is_string())
+                throw ManifestFieldError(
+                    "config.set: 'values' entry '" + it.key() + "' must be a string");
+            config_set(s, object_name, it.key(), it.value().get<std::string>());
+        }
+    };
 }
 
 const HandlerEntry& HandlerRegistry::lookup(const std::string& op) const
