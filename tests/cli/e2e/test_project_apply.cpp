@@ -4,6 +4,7 @@
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
 #include <fstream>
+#include <sstream>
 
 using namespace bambu_cli_test;
 namespace fs = boost::filesystem;
@@ -277,4 +278,48 @@ TEST_CASE("project apply: split-to-parts on single-component mesh -> exit 7",
 
     fs::remove(in);
     fs::remove_all(mfdir);
+}
+
+// ============================================================
+// Task 27: 12-plate workflow happy-path E2E test
+// ============================================================
+
+TEST_CASE("project apply: 12-plate workflow happy path",
+          "[project_apply][e2e][workflow]") {
+    const std::string in    = fresh_temp_path("_apply_12_in.3mf");
+    const std::string out   = fresh_temp_path("_apply_12_out.3mf");
+    const std::string mfdir = fresh_temp_path("_apply_12_d");
+    fs::create_directories(mfdir);
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+
+    // Build a manifest that adds 12 plates and sets 2 config keys.
+    // (Using only Bambu-valid config keys: layer_height + line_width.)
+    std::ostringstream m;
+    m << R"({"version":1,"operations":[)";
+    for (int i = 1; i <= 12; ++i) {
+        if (i > 1) m << ",";
+        m << R"({"op":"plate.add","name":"P)" << i << R"("})";
+    }
+    m << R"(,{"op":"config.set","values":{)"
+      << R"("layer_height":"0.2",)"
+      << R"("line_width":"0.45")"
+      << R"(}})";
+    m << "]}";
+    std::string mf = write_manifest(mfdir, m.str());
+
+    auto r = spawn_cli({"--json", "project", "apply", in,
+                        "--manifest", mf, "--output", out});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_text.find("\"steps_applied\":13") != std::string::npos);
+    REQUIRE(fs::exists(out));
+
+    // Quick re-inspect: reference fixture has 1 plate + 12 added = 13.
+    auto pr = spawn_cli({"--json", "plate", "list", out});
+    REQUIRE(pr.exit_code == 0);
+    REQUIRE(pr.stdout_text.find("\"plate_count\":13") != std::string::npos);
+
+    run_all_basic(out);
+
+    fs::remove(in); fs::remove(out); fs::remove_all(mfdir);
 }

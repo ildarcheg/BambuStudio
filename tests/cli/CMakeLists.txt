@@ -63,6 +63,7 @@ set(BAMBU_CLI_TEST_SOURCES
     roundtrip/test_project_tab.cpp
     roundtrip/test_reference_3mf_passthrough.cpp
     roundtrip/test_non_ascii_metadata.cpp
+    roundtrip/test_apply_roundtrip.cpp
 )
 
 # cli_tests links the bambu_cli_core static library (defined in src/cli/
