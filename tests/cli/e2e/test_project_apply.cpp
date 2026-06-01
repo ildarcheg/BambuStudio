@@ -64,3 +64,94 @@ TEST_CASE("project apply --dry-run: failing path skips save, propagates exit cod
     fs::remove(in);
     fs::remove_all(mfdir);
 }
+
+// ============================================================
+// Task 25: manifest-validation E2E tests
+// ============================================================
+
+TEST_CASE("project apply: missing manifest file yields exit 2",
+          "[project_apply][e2e][manifest]") {
+    const std::string in  = fresh_temp_path("_apply_nomf_in.3mf");
+    const std::string out = fresh_temp_path("_apply_nomf_out.3mf");
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+
+    // Point at a path that does not exist.
+    std::string mf = fresh_temp_path("_apply_nomf_NONEXISTENT.json");
+
+    auto r = spawn_cli({"--json", "project", "apply", in,
+                        "--manifest", mf, "--output", out});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_text.find("file_not_found") != std::string::npos);
+    // Output must not have been created since we never reached save.
+    REQUIRE_FALSE(fs::exists(out));
+
+    fs::remove(in);
+}
+
+TEST_CASE("project apply: bad JSON in manifest yields exit 3",
+          "[project_apply][e2e][manifest]") {
+    const std::string in  = fresh_temp_path("_apply_badjson_in.3mf");
+    const std::string out = fresh_temp_path("_apply_badjson_out.3mf");
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+
+    std::string mfdir = fresh_temp_path("_apply_badjson_d");
+    fs::create_directories(mfdir);
+    std::string mf = write_manifest(mfdir, "{ this is not valid JSON }");
+
+    auto r = spawn_cli({"--json", "project", "apply", in,
+                        "--manifest", mf, "--output", out});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 3);
+    REQUIRE(r.stderr_text.find("parse_failure") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(out));
+
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
+
+TEST_CASE("project apply: wrong manifest version yields exit 1",
+          "[project_apply][e2e][manifest]") {
+    const std::string in  = fresh_temp_path("_apply_badver_in.3mf");
+    const std::string out = fresh_temp_path("_apply_badver_out.3mf");
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+
+    std::string mfdir = fresh_temp_path("_apply_badver_d");
+    fs::create_directories(mfdir);
+    // version 99 is not supported.
+    std::string mf = write_manifest(mfdir,
+        R"({"version":99,"operations":[]})");
+
+    auto r = spawn_cli({"--json", "project", "apply", in,
+                        "--manifest", mf, "--output", out});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(out));
+
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
+
+TEST_CASE("project apply: unknown op in manifest yields exit 1",
+          "[project_apply][e2e][manifest]") {
+    const std::string in  = fresh_temp_path("_apply_badop_in.3mf");
+    const std::string out = fresh_temp_path("_apply_badop_out.3mf");
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+
+    std::string mfdir = fresh_temp_path("_apply_badop_d");
+    fs::create_directories(mfdir);
+    // "banana.split" is not a registered op.
+    std::string mf = write_manifest(mfdir,
+        R"({"version":1,"operations":[{"op":"banana.split"}]})");
+
+    auto r = spawn_cli({"--json", "project", "apply", in,
+                        "--manifest", mf, "--output", out});
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(out));
+
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}
