@@ -616,7 +616,7 @@ Notes: `docs/cli/notes/2026-05-29-drop-to-bed-hull-vs-mesh.md`
   - unit/test_project_apply_handlers.cpp — 79 cases (per-handler happy + rejection + override-shape + ConfigBatchError + functional reach-through)
   - e2e/test_project_apply.cpp — 12 cases (dry-run × 2, manifest × 4, schema-vs-semantic exit-7 × 5, 12-plate workflow × 1)
   - roundtrip/test_apply_roundtrip.cpp — 3 cases (empty-manifest roundtrip, sequential-vs-batch equivalence, plus one consequence assertion)
-- [ ] Manual GUI sign-off — six smoke artifacts to produce + open in Bambu Studio (12-plate workflow, dry-run, schema-typo error envelope, config-batch failing_key error envelope, exit-7 semantic split, object.add via batch). Recipe TBD as steps 21+ of `docs/cli/manual-test.md`.
+- [x] Manual GUI sign-off (Steps 21–24 of `docs/cli/manual-test.md`) — 2026-06-01, four smoke artifacts verified in Bambu Studio: 12-plate batch workflow, object.add with translate + drop-to-bed, plate.arrange via batch (4 cubes), mixed-ops batch (plate.add + 2×object.add + config.set + plate.arrange + plate.drop-to-bed). The dry-run / schema-typo / failing_key / exit-7 cases produce stderr text not visible files; they are covered by E2E tests instead.
 
 Spec: `docs/superpowers/specs/2026-05-31-project-apply-batch-design.md`
 Plan: `docs/superpowers/plans/2026-05-31-project-apply-batch.md`

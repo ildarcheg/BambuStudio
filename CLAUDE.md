@@ -106,11 +106,10 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
   their work landed via the Phase A–F and convergence commits.
 
 ## Open items (carryover, not regressions)
-- `docs/cli/status.md` manual GUI smoke gates still `[ ]` for M1–M10,
-  Phases B/C/D, and **M12** — none of the produced 3MFs have been
-  signed off by opening in Bambu Studio. M11 is the one signed-off
-  milestone (2026-05-30).
-- Master is **33 commits ahead of `origin/master`** — push when ready.
+- `docs/cli/status.md` manual GUI smoke gates still `[ ]` for M1–M10
+  and Phases B/C/D — none of those 3MFs have been signed off in
+  Bambu Studio. M11 (2026-05-30) and M12 (2026-06-01) are the two
+  signed-off milestones.
 - `bambu-cli --verbose` is parsed but a no-op (intentional deferral —
   see Phase F.1 entry in `status.md`).
 - No `install(TARGETS bambu-cli)` — ships from `build/` only

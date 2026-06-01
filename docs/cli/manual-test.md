@@ -445,35 +445,49 @@ cube (`cube_P<N>`) centered on that plate. The Process / Print
 settings panel should show `layer_height = 0.2` and the line-width
 override applied.
 
-[ ] open-and-verify in Bambu Studio -- signed off ____
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
 
 ---
 
-## Step 22: project apply -- object.add with translate transform (M12)
+## Step 22: project apply -- object.add with translate + drop-to-bed (M12)
 
 Verifies the `parse_transform` integration: a manifest-specified
 `translate` lands the object at the right plate-local coordinates.
+
+**Pattern note:** `object.add` with a manual `translate` does NOT apply
+the default Z-drop (the drop only fires on the no-transform code path).
+The cube STL is origin-centered, so a bare `translate: {x: 80, y: 80}`
+puts the cube center at z=0 — half-below-bed. The realistic batch
+pattern is to follow `object.add` with `plate.drop-to-bed` (this is
+what the GUI's add-then-drop gizmo combination does). This step's
+manifest demonstrates that pattern.
 
 ```powershell
 $root = "$env:TEMP\bambu-m12-signoff\02-object-add-tx"
 New-Item -ItemType Directory -Force $root | Out-Null
 Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
 $cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
-$mf = "{`"version`":1,`"operations`":[{`"op`":`"object.add`",`"plate`":`"Plate 01 test`",`"stl`":`"$cube`",`"name`":`"cube_off_center`",`"translate`":{`"x`":80.0,`"y`":80.0}}]}"
+$mf = @"
+{"version":1,"operations":[
+  {"op":"object.add","plate":"Plate 01 test","stl":"$cube","name":"cube_off_center","translate":{"x":80.0,"y":80.0}},
+  {"op":"plate.drop-to-bed","plate":"Plate 01 test"}
+]}
+"@
 Set-Content -Path "$root\m.json" -Value $mf
 & $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
 Write-Host "exit: $LASTEXITCODE"
 ```
 
-**Expected:** exit 0. Stdout JSON includes `"steps_applied":1`.
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":2`.
 
 **[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. On "Plate
 01 test" you should see a new object `cube_off_center` placed at
 plate-local (80, 80) — visibly off-centered toward the upper-right
-quadrant of the bed. The pre-existing reference object stays where it
-was. Z is dropped to bed.
+quadrant of the bed — and **sitting on the bed** (bottom face at z=0,
+not intersecting the build plate). The pre-existing reference object
+stays where it was.
 
-[ ] open-and-verify in Bambu Studio -- signed off ____
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
 
 ---
 
@@ -506,7 +520,7 @@ overlap**, nested compactly on the bed (typical 2×2 grid or
 arrangement-engine layout). All 4 must be fully on-bed. The
 canonical "Plate 01 test" remains unchanged.
 
-[ ] open-and-verify in Bambu Studio -- signed off ____
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
 
 ---
 
@@ -528,7 +542,8 @@ $mf = @"
   {"op":"object.add","plate":"MixedPlate","stl":"$cube","name":"cube_mixed_1","translate":{"x":60,"y":60}},
   {"op":"object.add","plate":"MixedPlate","stl":"$cube","name":"cube_mixed_2","translate":{"x":200,"y":200}},
   {"op":"config.set","values":{"layer_height":"0.16","line_width":"0.5"}},
-  {"op":"plate.arrange","plate":"MixedPlate"}
+  {"op":"plate.arrange","plate":"MixedPlate"},
+  {"op":"plate.drop-to-bed","plate":"MixedPlate"}
 ]}
 "@
 Set-Content -Path "$root\m.json" -Value $mf
@@ -536,16 +551,21 @@ Set-Content -Path "$root\m.json" -Value $mf
 Write-Host "exit: $LASTEXITCODE"
 ```
 
-**Expected:** exit 0. Stdout JSON includes `"steps_applied":5`.
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":6`.
+
+**Note:** `plate.arrange` operates on XY only — it does not drop to
+bed. So the manifest appends `plate.drop-to-bed` to ensure the
+manual-translate cubes sit on the bed in the final output (same
+pattern as Step 22).
 
 **[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The
 "MixedPlate" plate should contain **2 cubes laid out without overlap**
-(after arrange compacted them from their initial translate positions).
-The Process / Print settings panel should show `layer_height = 0.16`
-and the line-width override. The canonical "Plate 01 test" remains
-unchanged.
+(after arrange compacted them from their initial translate positions),
+**both sitting on the bed**. The Process / Print settings panel should
+show `layer_height = 0.16` and the line-width override. The canonical
+"Plate 01 test" remains unchanged.
 
-[ ] open-and-verify in Bambu Studio -- signed off ____
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
 
 ---
 
