@@ -63,20 +63,15 @@ merge-parts) whose overrides remap `invalid_argument` to exit 7.
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
 ## Branch state (as of 2026-07-14)
-- `master` HEAD: now the former `port-cli-v2.08` branch tip
-  (`f53dca7cb`, "build: re-apply CMake portability fixes"), reset via
-  `git reset --hard port-cli-v2.08`. New base is upstream tag
-  `v02.08.00.50` (`a78684a11`) — bambu-cli was ported forward from the
-  prior 2.7-era base onto this tag.
-- Port commits (on top of `v02.08.00.50`): `2ea7b3f90` (bambu-cli tree
-  port from `archive/v2.7-cli`), `3426e99b1` (re-apply
-  `add_subdirectory(cli)` hooks in `src/` and `tests/`), `f53dca7cb`
-  (4 CMake portability fixes — min-version bumps +
-  `Freetype::Freetype`). **Zero changes were needed to `src/cli` or
-  `tests/cli` source themselves** — `load_bbs_3mf` / `StoreParams` /
-  `Arrange` / `Orient` APIs are unchanged between the old base and
-  `v02.08.00.50`, and the stubs in `stubs_for_libslic3r.cpp` remain
-  both necessary and sufficient.
+- `master` = tip of `port-cli-v2.08` = upstream `a78684a11` (v02.08.00.50)
+  + port commits `2ea7b3f90` (CLI tree port from `archive/v2.7-cli`),
+  `3426e99b1` (re-apply `add_subdirectory(cli)` hooks in `src/` and
+  `tests/`), `f53dca7cb` (4 CMake portability fixes — min-version bumps +
+  `Freetype::Freetype`), `3817797a9` (port record / docs). **Zero changes
+  were needed to `src/cli` or `tests/cli` source themselves** —
+  `load_bbs_3mf` / `StoreParams` / `Arrange` / `Orient` APIs are unchanged
+  between the old base and `v02.08.00.50`, and the stubs in
+  `stubs_for_libslic3r.cpp` remain both necessary and sufficient.
 - `archive/v2.7-cli` tag (`6cb539d2f`) preserves the entire pre-port
   2.7-era lineage — the old `master` HEAD before this reset, including
   all M0–M12 + Phase A–G + convergence history and the port
