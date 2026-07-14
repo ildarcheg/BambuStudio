@@ -626,8 +626,10 @@ Range: `029c51e85..7777688ab` (28 commits — 27 plan tasks + 1 polish fix `7777
 
 Ports the entire `bambu-cli` effort (M0 through M12, all lettered
 Phases, and both convergence rounds) from the prior 2.7-era base onto
-upstream tag `v02.08.00.50`. Nine-task plan under
-`.superpowers/sdd/`; this is the final (docs + master-reset) task.
+upstream tag `v02.08.00.50`.
+
+Spec: `docs/superpowers/specs/2026-07-14-port-cli-v208-design.md`
+Plan: `docs/superpowers/plans/2026-07-14-port-cli-v208.md`
 
 ### What carried
 

@@ -13,7 +13,7 @@ the `cli_tests` Catch2 binary link it (no drift). All mutations go
 through libslic3r's own `load_bbs_3mf` / `store_bbs_3mf` / `Model` /
 `DynamicPrintConfig` / `PlateData` / `print_config_def` — no upstream
 monkey-patching, no `#ifdef`s, only an `add_subdirectory(cli)` hook in
-`src/CMakeLists.txt:28` and `tests/CMakeLists.txt:38`. Save path is a
+`src/CMakeLists.txt:28` and `tests/CMakeLists.txt:39`. Save path is a
 `.bak`-swap atomic pattern (ported from OrcaSlicer M11) in
 `src/cli/io.cpp:284-310` with a three-check post-write invariant guard
 (rels target resolution / per-plate thumbnails / vector-config
@@ -64,11 +64,10 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
 ## Branch state (as of 2026-07-14)
 - `master` = tip of `port-cli-v2.08` = upstream `a78684a11` (v02.08.00.50)
-  + port commits `2ea7b3f90` (CLI tree port from `archive/v2.7-cli`),
-  `3426e99b1` (re-apply `add_subdirectory(cli)` hooks in `src/` and
-  `tests/`), `f53dca7cb` (4 CMake portability fixes — min-version bumps +
-  `Freetype::Freetype`), `3817797a9` (port record / docs). **Zero changes
-  were needed to `src/cli` or `tests/cli` source themselves** —
+  + the port commits (tree port `2ea7b3f90`, hooks `3426e99b1`, CMake
+  portability fixes `f53dca7cb`, port record `3817797a9`) plus subsequent
+  docs polish — `git log a78684a11..master` is authoritative. **Zero
+  changes were needed to `src/cli` or `tests/cli` source themselves** —
   `load_bbs_3mf` / `StoreParams` / `Arrange` / `Orient` APIs are unchanged
   between the old base and `v02.08.00.50`, and the stubs in
   `stubs_for_libslic3r.cpp` remain both necessary and sufficient.
@@ -176,7 +175,7 @@ Do not do step 2 without step 1 first.
 - `docs/cli/notes/2026-05-21-bbs-profile-storage.md` — why Bambu's
   profile storage differs from Orca's.
 - `docs/cli/status.md` — milestone-by-milestone status (M0..M12 +
-  Phases A..F + convergence).
+  Phases A..G + convergence).
 - `docs/cli/manual-test.md` — 383-line manual GUI smoke recipe.
 - `docs/superpowers/specs/2026-05-31-project-apply-batch-design.md` —
   M12 spec (1001 lines).
