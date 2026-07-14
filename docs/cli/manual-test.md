@@ -1,0 +1,617 @@
+# bambu-cli -- manual smoke test recipe (v1)
+
+This recipe exercises the full v1 surface end-to-end against the canonical
+local-realistic fixtures. Run it before every release. Each step documents the
+expected exit code and output. Steps that interact with Bambu Studio are marked
+**[BS layer-2 check]** -- the human performs those; the CLI steps can be
+automated.
+
+---
+
+## Prerequisites
+
+- `bambu-cli.exe` built at `build\src\cli\Release\bambu-cli.exe` (set `$cli`
+  below to the actual path if different).
+- Canonical fixtures committed under `tests\cli\fixtures\local\` in this repo:
+  - `temp_project_for_bambu_studio.3mf` -- pre-configured reference
+    (1 plate, 4 filament slots, AMS configured).
+  - `stls\000_01_test_cube.stl`
+  - `stls\000_01_test_cylinder.stl`
+  - `stls\000_01_test_cone.stl`
+  - `stls\000_01_test_bambu_cube.stl`
+- Bambu Studio installed (used for layer-2 visual checks only).
+
+Run this recipe from the repo root. Set these variables at the top of your
+PowerShell session:
+
+```powershell
+$cli     = ".\build\src\cli\Release\bambu-cli.exe"
+$out     = "$env:TEMP\bcli_smoke.3mf"
+$ref     = ".\tests\cli\fixtures\local\temp_project_for_bambu_studio.3mf"
+$stldir  = ".\tests\cli\fixtures\local\stls"
+```
+
+---
+
+## Step 1: Verify the binary
+
+```powershell
+& $cli --version
+& $cli --help
+```
+
+**Expected:**
+- `--version` prints `bambu-cli 0.1.0` (exit 0).
+- `--help` prints the subcommand list. The first line of the description reads
+  `bambu-cli -- compose .3mf project files for Bambu Studio` (two hyphens, no
+  em-dash). Exit 0.
+
+---
+
+## Step 2: project init (clone-and-verify)
+
+```powershell
+& $cli project init $out --template $ref
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout:
+```
+project init: clone-and-verify succeeded -> <path to $out>
+```
+
+**[BS layer-2 check]** Open `$out` in Bambu Studio. Verify it looks identical
+to the reference template (same plate name, same filament configuration in the
+AMS panel). Close BS.
+
+---
+
+## Step 3: plate add -- add a second plate
+
+```powershell
+& $cli plate add $out --name "Plate-2"
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli plate list $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- `plate add` exits 0. Stdout: `plate added: Plate-2 -> <path>`
+- `plate list` exits 0. Stdout lists both plate names (one per line with index),
+  e.g.:
+  ```
+  1  <original plate name>
+  2  Plate-2
+  ```
+
+**[BS layer-2 check]** Open `$out` in BS. The plate selector at the top shows
+two plates. Close BS.
+
+---
+
+## Step 4: object add -- place objects on Plate-2 with filament, transforms
+
+```powershell
+& $cli object add $out --plate "Plate-2" `
+    --stl "$stldir\000_01_test_cube.stl" `
+    --filament 1 --translate 30,30
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli object add $out --plate "Plate-2" `
+    --stl "$stldir\000_01_test_cylinder.stl" `
+    --filament 2 --translate 80,30
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli object add $out --plate "Plate-2" `
+    --stl "$stldir\000_01_test_cone.stl" `
+    --filament 3 --translate 30,80
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli object add $out --plate "Plate-2" `
+    --stl "$stldir\000_01_test_bambu_cube.stl" `
+    --filament 4 --translate 80,80 --rotate 0,0,45 --scale 1.2
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** each command exits 0. Stdout per command:
+```
+object added: <stem name> -> <path>
+```
+
+Verify with object list:
+
+```powershell
+& $cli --json object list $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. JSON contains `"object_count":4` and all four object names
+in the `"objects"` array. Each object has an `"extruder"` field matching the
+`--filament` value passed (1, 2, 3, 4 respectively).
+
+**[BS layer-2 check]** Open `$out` in BS. Switch to Plate-2. Four objects are
+visible, each rendered in its distinct AMS slot color. The bambu-cube is
+rotated 45 degrees and visibly larger (1.2x scale). Close BS.
+
+---
+
+## Step 5: multi-copy object add (--count)
+
+```powershell
+& $cli object add $out --plate "Plate-2" `
+    --stl "$stldir\000_01_test_cube.stl" `
+    --filament 1 --count 3
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli --json object list $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** `object add` exits 0. The subsequent `object list` reports
+`"object_count":7` (4 from step 4 + 3 copies from this step). All three new
+copies are named `000_01_test_cube`.
+
+---
+
+## Step 6: config set -- project-level override
+
+```powershell
+& $cli config set $out --key line_width --value 0.5
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli --json config list $out --changed-only
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- `config set` exits 0. Stdout: `config set: project line_width=0.5 -> <path>`
+- `config list --changed-only` exits 0. JSON output contains `"key":"line_width"`
+  and `"value":"0.5"` in the `"entries"` array.
+
+**[BS layer-2 check]** Open `$out` in BS. In the process settings panel, Line
+width should show 0.5 mm as a project override.
+
+---
+
+## Step 7: config set --object -- per-object override
+
+```powershell
+& $cli config set $out --object "000_01_test_cube" --key line_width --value 0.4
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout:
+```
+config set: object '000_01_test_cube' line_width=0.4 -> <path>
+```
+
+**[BS layer-2 check]** Open `$out` in BS. Select the cube object on Plate-2.
+In Object Settings, Line width shows 0.4 mm as a per-object override.
+
+---
+
+## Step 8: object set-filament -- retrofit existing object
+
+```powershell
+& $cli object set-filament $out --name "000_01_test_cylinder" --filament 4
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli --json object list $out --plate "Plate-2"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- `set-filament` exits 0. Stdout: `set-filament: 000_01_test_cylinder -> 4`
+- `object list` JSON shows `"extruder":4` for the cylinder entry.
+
+---
+
+## Step 9: object remove (with group-by-name)
+
+```powershell
+# Remove the cone (single object).
+& $cli object remove $out --name "000_01_test_cone"
+Write-Host "exit: $LASTEXITCODE"
+
+# Remove all 3 copies of the cube added in step 5.
+# group-by-name removes all ModelObjects sharing that name.
+& $cli object remove $out --name "000_01_test_cube"
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli --json object list $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- Both `object remove` commands exit 0.
+- The final `object list` reports `"object_count":2` (cylinder and bambu_cube
+  remain on Plate-2). No entry for `000_01_test_cone` or `000_01_test_cube`.
+
+---
+
+## Step 10: plate rename
+
+```powershell
+& $cli plate rename $out --from "Plate-2" --to "FinalLayout"
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli plate list $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- `plate rename` exits 0. Stdout: `plate renamed: Plate-2 -> FinalLayout in <path>`
+- `plate list` shows "FinalLayout" in place of "Plate-2".
+
+---
+
+## Step 11: plate remove (remove an empty plate)
+
+First add a throwaway plate, then remove it:
+
+```powershell
+& $cli plate add $out --name "Throwaway"
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli plate remove $out --name "Throwaway"
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli plate list $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- Both commands exit 0.
+- Final `plate list` shows only the original plate and "FinalLayout" (no
+  "Throwaway").
+
+---
+
+## Step 12: config unset
+
+```powershell
+& $cli config unset $out --key line_width
+Write-Host "exit: $LASTEXITCODE"
+
+& $cli --json config list $out --changed-only
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:**
+- `config unset` exits 0. Stdout: `config unset: project line_width -> <path>`
+- `config list --changed-only` exits 0. JSON output does NOT contain
+  `"key":"line_width"` (the key was removed from the changed set).
+
+---
+
+## Step 13: JSON mode smoke check
+
+```powershell
+& $cli --json inspect $out
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. JSON stdout Shape A:
+```json
+{"status":"ok","code":"ok","message":"inspect ok","data":{"plate_count":2,"object_count":2,"filament_count":4}}
+```
+
+(Exact counts depend on the steps above. `plate_count` should be 2 --
+original plate + FinalLayout. `object_count` should be 2 -- cylinder and
+bambu_cube. `filament_count` is determined by the template and should be 4.)
+
+---
+
+## Step 14: error handling smoke check
+
+```powershell
+& $cli inspect Z:\no\such\file.3mf
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 2. Stderr contains `file_not_found`.
+
+```powershell
+& $cli --json inspect Z:\no\such\file.3mf
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 2. Stderr contains JSON Shape A error:
+`{"status":"error","code":"file_not_found","message":"..."}`
+
+---
+
+## Step 15: [BS layer-2 check] Final open + slice
+
+Open `$out` in Bambu Studio:
+
+1. Switch to the "FinalLayout" plate.
+2. Verify two objects are present: cylinder and bambu_cube.
+3. Cylinder should render in AMS slot 4 (retrofitted in step 8).
+4. bambu_cube should render in AMS slot 4, rotated 45 degrees, scaled 1.2x.
+5. Click **Slice plate**. Slicing must succeed with no errors.
+6. In the preview, verify objects render in the correct AMS slot colors.
+7. Save the gcode if desired.
+
+---
+
+## Step 16: plate center -- center every instance on a plate
+
+```powershell
+& $cli plate center $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate centered: Plate 01 test`.
+
+**[BS layer-2 check]** Open `$out` in Bambu Studio. Every object on the
+plate should be at the plate centroid (stacked if multiple). Z
+unchanged.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
+
+---
+
+## Step 17: plate drop-to-bed -- drop every instance to bed
+
+```powershell
+& $cli plate drop-to-bed $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate dropped-to-bed: Plate 01 test`. XY
+unchanged; every object sits with its lowest face on the bed.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
+
+---
+
+## Step 18: plate arrange -- mimic the per-plate Arrange button
+
+```powershell
+& $cli plate arrange $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate arranged: Plate 01 test`. Objects
+on the plate nest without overlap, respecting `bed_exclude_area`. Other
+plates untouched. If overflow: exit 9 with
+`arrange: N object(s) did not fit on plate 'Plate 01 test'`.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
+
+---
+
+## Step 19: plate auto-orient -- orient and drop every object on a plate
+
+```powershell
+& $cli plate auto-orient $out --plate "Plate 01 test"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `plate auto-oriented: Plate 01 test`.
+Each object on the plate rotated to its best printing orientation and
+dropped to bed.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
+
+---
+
+## Step 20: object auto-orient -- orient a single named object
+
+```powershell
+& $cli object auto-orient $out --name Bracket
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout: `object auto-oriented: Bracket`. All
+instances of "Bracket" oriented and dropped, regardless of plate
+membership.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-05-30
+
+---
+
+## Step 21: project apply -- 12-plate batch workflow (M12)
+
+The motivating M12 use case: build a multi-plate project in a single
+load/save cycle via a JSON manifest. This recipe adds 12 plates + 1
+cube per plate + 2 config keys in one call.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\01-12-plate"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$ops = @()
+1..12 | ForEach-Object { $ops += "{`"op`":`"plate.add`",`"name`":`"P$_`"}" }
+1..12 | ForEach-Object { $ops += "{`"op`":`"object.add`",`"plate`":`"P$_`",`"stl`":`"$cube`",`"name`":`"cube_P$_`"}" }
+$ops += '{"op":"config.set","values":{"layer_height":"0.2","line_width":"0.45"}}'
+$mf = "{`"version`":1,`"operations`":[$($ops -join ',')]}"
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":25` (12
+plate.add + 12 object.add + 1 config.set) and
+`"output":"$root\out.3mf"`.
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The plate
+selector should show **13 plates total** (the canonical "Plate 01 test"
+plus P1..P12). Switching through each P1..P12 plate should show one
+cube (`cube_P<N>`) centered on that plate. The Process / Print
+settings panel should show `layer_height = 0.2` and the line-width
+override applied.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
+
+---
+
+## Step 22: project apply -- object.add with translate + drop-to-bed (M12)
+
+Verifies the `parse_transform` integration: a manifest-specified
+`translate` lands the object at the right plate-local coordinates.
+
+**Pattern note:** `object.add` with a manual `translate` does NOT apply
+the default Z-drop (the drop only fires on the no-transform code path).
+The cube STL is origin-centered, so a bare `translate: {x: 80, y: 80}`
+puts the cube center at z=0 — half-below-bed. The realistic batch
+pattern is to follow `object.add` with `plate.drop-to-bed` (this is
+what the GUI's add-then-drop gizmo combination does). This step's
+manifest demonstrates that pattern.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\02-object-add-tx"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$mf = @"
+{"version":1,"operations":[
+  {"op":"object.add","plate":"Plate 01 test","stl":"$cube","name":"cube_off_center","translate":{"x":80.0,"y":80.0}},
+  {"op":"plate.drop-to-bed","plate":"Plate 01 test"}
+]}
+"@
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":2`.
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. On "Plate
+01 test" you should see a new object `cube_off_center` placed at
+plate-local (80, 80) — visibly off-centered toward the upper-right
+quadrant of the bed — and **sitting on the bed** (bottom face at z=0,
+not intersecting the build plate). The pre-existing reference object
+stays where it was.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
+
+---
+
+## Step 23: project apply -- plate.arrange via batch (M12)
+
+Adds a new plate, places 4 cubes on it (default placement), then runs
+`plate.arrange` — all in one manifest. Verifies the arrange step
+correctly lays out batch-added objects.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\03-plate-arrange"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$ops = @('{"op":"plate.add","name":"ArrangeTest"}')
+1..4 | ForEach-Object { $ops += "{`"op`":`"object.add`",`"plate`":`"ArrangeTest`",`"stl`":`"$cube`",`"name`":`"cube_arr_$_`"}" }
+$ops += '{"op":"plate.arrange","plate":"ArrangeTest"}'
+$mf = "{`"version`":1,`"operations`":[$($ops -join ',')]}"
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":6` (1
+plate.add + 4 object.add + 1 plate.arrange).
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The
+"ArrangeTest" plate should contain **4 cubes laid out without
+overlap**, nested compactly on the bed (typical 2×2 grid or
+arrangement-engine layout). All 4 must be fully on-bed. The
+canonical "Plate 01 test" remains unchanged.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
+
+---
+
+## Step 24: project apply -- mixed-ops batch (M12)
+
+The integration smoke: one manifest combining `plate.add` +
+`object.add` (with transforms) + `config.set` (batch shorthand) +
+`plate.arrange`. Verifies all four mutation classes compose correctly
+in a single load/save cycle.
+
+```powershell
+$root = "$env:TEMP\bambu-m12-signoff\04-mixed"
+New-Item -ItemType Directory -Force $root | Out-Null
+Copy-Item "$pwd\tests\cli\fixtures\reference.3mf" "$root\in.3mf" -Force
+$cube = ("$pwd\tests\cli\fixtures\stls\cube.stl").Replace('\','\\')
+$mf = @"
+{"version":1,"operations":[
+  {"op":"plate.add","name":"MixedPlate"},
+  {"op":"object.add","plate":"MixedPlate","stl":"$cube","name":"cube_mixed_1","translate":{"x":60,"y":60}},
+  {"op":"object.add","plate":"MixedPlate","stl":"$cube","name":"cube_mixed_2","translate":{"x":200,"y":200}},
+  {"op":"config.set","values":{"layer_height":"0.16","line_width":"0.5"}},
+  {"op":"plate.arrange","plate":"MixedPlate"},
+  {"op":"plate.drop-to-bed","plate":"MixedPlate"}
+]}
+"@
+Set-Content -Path "$root\m.json" -Value $mf
+& $cli --json project apply "$root\in.3mf" --manifest "$root\m.json" --output "$root\out.3mf"
+Write-Host "exit: $LASTEXITCODE"
+```
+
+**Expected:** exit 0. Stdout JSON includes `"steps_applied":6`.
+
+**Note:** `plate.arrange` operates on XY only — it does not drop to
+bed. So the manifest appends `plate.drop-to-bed` to ensure the
+manual-translate cubes sit on the bed in the final output (same
+pattern as Step 22).
+
+**[BS layer-2 check]** Open `$root\out.3mf` in Bambu Studio. The
+"MixedPlate" plate should contain **2 cubes laid out without overlap**
+(after arrange compacted them from their initial translate positions),
+**both sitting on the bed**. The Process / Print settings panel should
+show `layer_height = 0.16` and the line-width override. The canonical
+"Plate 01 test" remains unchanged.
+
+[x] open-and-verify in Bambu Studio -- signed off 2026-06-01
+
+---
+
+## Cleanup
+
+```powershell
+Remove-Item $out -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\bambu-m12-signoff" -Recurse -Force -ErrorAction SilentlyContinue
+```
+
+---
+
+## Known limitations
+
+These are parked gaps documented for future maintainers. They are NOT bugs that
+block v1 release; they are design constraints with known workarounds.
+
+### M3: plate-metadata gap (top_file / pick_file / filament_map_mode)
+
+CLI-created plates do not carry `top_file`, `pick_file`, and `filament_map_mode`
+metadata that Bambu Studio writes when it creates plates. This means the plate
+may show a blank thumbnail icon in the BS plate selector. The plate is otherwise
+functional: objects slice and gcode generates correctly. Fix requires reverse-
+engineering BS's thumbnail generation pipeline. Parked for v2.
+
+### M7: config list shows changed-vs-system, not changed-vs-default
+
+`config list --changed-only` reports keys present in the `different_settings_to_system`
+array, which is the set of keys that differ from the system profile -- not keys
+that differ from libslic3r factory defaults. This means some "default" values may
+appear as changed if the project's system profile differs from factory defaults.
+Adding a `--all` flag or a full default-comparison mode was out of scope for v1.
+
+### M7: key nomenclature (line_width vs specific per-feature width keys)
+
+Bambu Studio splits line width into per-feature keys (e.g.
+`outer_wall_line_width`, `inner_wall_line_width`, `sparse_infill_line_width`).
+Setting `line_width` as a project-level override sets the base value; BS may
+override it with per-feature values during slicing. For precise control, use
+the specific per-feature key names. The full list is visible in BS's process
+settings panel.
+
+### M3/M6: cross-plate stride is bed-width-aware (no manual override needed)
+
+`--count N` placements on plate K use a bed-aware stride
+`stride_xy = bed_extent * 1.2` per plate (matching BBS
+`PartPlateList::LOGICAL_PART_PLATE_GAP = 1.0/5.0 = 0.2`). On a 256 mm X1C bed plate 2
+sits at world X = 307.2 mm; on a 400 mm bed plate 2 sits at 480 mm.
+Tested in `tests/cli/test_plate_stride.cpp`.
