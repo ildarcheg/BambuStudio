@@ -133,7 +133,12 @@ that for a clean base and one conflict-free pass.
 ## Risks
 
 - **Deps rebuild flakiness** (Windows): mitigated by documented
-  workarounds; Defender exclusions already cover both dirs' parent.
+  workarounds. NOTE: Defender exclusions are per-directory (repo and
+  old deps dir only) — the new `BambuStudio_dep_v208` dir must be
+  excluded *before* the deps build (admin `Add-MpPreference`), and
+  2.08's `build_win.bat` must be pinned with `-v 16` (it now
+  auto-selects the newest installed VS, which is VS 2026 on this
+  machine, and that path demands CMake ≥ 4.2).
 - **Model assembly-data serialization (the specific 3mf-drift
   risk):** 2.08 adds per-volume `m_assemble_transformation` (+ an
   `m_assemble_initialized` flag) to `ModelVolume`'s cereal `ar(...)`
