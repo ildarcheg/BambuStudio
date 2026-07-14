@@ -62,25 +62,75 @@ merge-parts) whose overrides remap `invalid_argument` to exit 7.
 `.bak`-swap atomic save originated in OrcaSlicer M11 — Bambu ported it
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
-## Branch state (as of 2026-06-01)
-- `master` HEAD: `31529bf6e` (merge of `worktree-cli-project-apply-m12`
-  — M12 batch-manifest verb). **33 commits ahead of `origin/master`**;
-  not pushed yet.
-- M12 range: `029c51e85..7777688ab` (28 commits — 27 plan tasks + 1
-  polish fix). M11 merge is `562fdd5ab` on the same line of history.
-- `cross-project-convergence` branch retained at `90fbbbf7e` (the prior
-  convergence HEAD).
-- Convergence range: `65ecc50d9..90fbbbf7e` (Round 1: roundtrip tests,
-  cover-image refcount, identify_id pin, project-init staging-copy
-  TOCTOU. Round 2: `plate_world_origin` total-count fix, stubs
-  investigation kept-with-rationale).
-- Last `cli_tests` run: 447 cases / 4271 assertions, all green
-  (post-M12, +116 cases / +239 assertions vs M11). To build/run the
-  tests on macOS, reconfigure with
-  `-DSLIC3R_BUILD_TESTS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5` (the
-  default `BuildMac.sh` configures tests OFF); see
-  `tests/cli/cli_tests_main.cpp` for the macOS temp-dir harness fix.
+## Branch state (as of 2026-07-14)
+- `master` HEAD: now the former `port-cli-v2.08` branch tip
+  (`f53dca7cb`, "build: re-apply CMake portability fixes"), reset via
+  `git reset --hard port-cli-v2.08`. New base is upstream tag
+  `v02.08.00.50` (`a78684a11`) — bambu-cli was ported forward from the
+  prior 2.7-era base onto this tag.
+- Port commits (on top of `v02.08.00.50`): `2ea7b3f90` (bambu-cli tree
+  port from `archive/v2.7-cli`), `3426e99b1` (re-apply
+  `add_subdirectory(cli)` hooks in `src/` and `tests/`), `f53dca7cb`
+  (4 CMake portability fixes — min-version bumps +
+  `Freetype::Freetype`). **Zero changes were needed to `src/cli` or
+  `tests/cli` source themselves** — `load_bbs_3mf` / `StoreParams` /
+  `Arrange` / `Orient` APIs are unchanged between the old base and
+  `v02.08.00.50`, and the stubs in `stubs_for_libslic3r.cpp` remain
+  both necessary and sufficient.
+- `archive/v2.7-cli` tag (`6cb539d2f`) preserves the entire pre-port
+  2.7-era lineage — the old `master` HEAD before this reset, including
+  all M0–M12 + Phase A–G + convergence history and the port
+  spec/plan docs. It is `201` commits past `v02.07.00.55`
+  (`git rev-list --count v02.07.00.55..archive/v2.7-cli`). Two
+  upstream features present in that lineage were dropped by the port
+  (they no longer exist on the `v02.08.00.50` line and were not
+  reintroduced): the `alternate_extra_wall` print feature and the
+  camera-fullscreen GUI feature.
+- Not pushed to `origin` yet — `origin/master` still points at the old
+  (pre-port) history. See "Push guidance" below before publishing.
+- Last `cli_tests` run: **447 cases / 4271 assertions, all green** on
+  the ported tree (3 runs, incl. one randomized test order) — identical
+  counts to the pre-port 2.7-era baseline (post-M12). E2E smoke:
+  `project init` from `tests/cli/fixtures/test_reference.3mf` then
+  `inspect` → plates:1 objects:1 filaments:4; re-init from the CLI's
+  own output produced identical counts; all exit 0.
+- Build environment for the ported tree (Windows):
+  - Deps dir: `BambuStudio_dep_v208` (sibling of the repo), built via
+    `build_win.bat -d <dir> -s deps -v 16` (~14 min). **`-v 16` is
+    mandatory** — on this box, 2.08's `build_win.bat` otherwise
+    auto-selects the newest installed VS (2026) and then demands
+    CMake ≥ 4.2.
+  - FFMPEG `.pc` patch on the new deps is not just `prefix=`:
+    `libdir=./dist/lib` and `includedir=./dist/include` are hardcoded
+    relative paths in the 7 `lib*.pc` FFMPEG files and must be
+    rewritten to `${prefix}/lib` / `${prefix}/include`, else CMake
+    generate fails with "Target libslic3r_gui contains relative path
+    ./dist/include".
+  - Build dir: `build_v208`, configured with
+    `-DCMAKE_PREFIX_PATH=<repo>\..\BambuStudio_dep_v208\usr\local
+    -DSLIC3R_BUILD_TESTS=ON
+    -DPKG_CONFIG_EXECUTABLE=C:/Strawberry/perl/bin/pkg-config.bat`.
+    2.08 newly requires `pkg-config` at configure time; without the
+    explicit `-D`, CMake picks Strawberry's extensionless `perl`
+    script and configure fails.
+  - `cli_tests.exe` has no `POST_BUILD` DLL copy step in 2.08 (unlike
+    the old `build`/`BambuStudio_dep` setup) — run it with
+    `build_v208\src\cli\Release` and `build_v208\...\occt` (DLL dir)
+    prepended to `PATH`, else it fails with `0xC0000135`.
+  - GUI manual sign-off in Bambu Studio 2.08 is still pending
+    (user-driven gate, not yet performed) — see `docs/cli/status.md`.
 - Working tree is clean as of this CLAUDE.md write.
+
+## Push guidance (not yet executed — user's call)
+`master` was reset locally to the port branch tip; `origin/master`
+still has the old pre-port history. Publishing requires, **in this
+order**:
+1. `git push origin archive/v2.7-cli` — hard precondition, preserves
+   the entire 2.7-era lineage on the remote before it becomes
+   unreachable from `origin/master`.
+2. `git push --force-with-lease origin master` — rewrites
+   `origin/master` to the port branch tip.
+Do not do step 2 without step 1 first.
 
 ## File layout
 - `src/cli/` — entry (`main.cpp`), `io.{hpp,cpp}`,
@@ -109,11 +159,15 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 - `docs/cli/status.md` manual GUI smoke gates still `[ ]` for M1–M10
   and Phases B/C/D — none of those 3MFs have been signed off in
   Bambu Studio. M11 (2026-05-30) and M12 (2026-06-01) are the two
-  signed-off milestones.
+  signed-off milestones from the pre-port (2.7-era) lineage; the
+  v02.08.00.50 port itself has NOT had a GUI manual sign-off yet
+  (new open item as of 2026-07-14 — see "Branch state" above).
 - `bambu-cli --verbose` is parsed but a no-op (intentional deferral —
   see Phase F.1 entry in `status.md`).
-- No `install(TARGETS bambu-cli)` — ships from `build/` only
-  (`src/cli/CMakeLists.txt:100`).
+- No `install(TARGETS bambu-cli)` — ships from the build dir only
+  (`src/cli/CMakeLists.txt:100`; currently `build_v208\src\cli\Release`
+  for the ported tree, historically `build\src\cli\Release` for the
+  pre-port lineage).
 - Thumbnail passthrough for plates whose `plate_index` was compacted
   after a remove may fall back to synthesis instead of zero-copy
   (`src/cli/io.cpp:121-124`).
