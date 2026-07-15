@@ -48,6 +48,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_invariant_aux_passthrough.cpp
     unit/test_invariant_cover_references.cpp
     unit/test_index_conventions.cpp
+    unit/test_no_gui_includes.cpp
     unit/test_apply_helpers.cpp
     unit/test_apply_manifest.cpp
     unit/test_project_apply_handlers.cpp
@@ -83,6 +84,7 @@ target_compile_definitions(cli_tests PRIVATE
     BAMBU_CLI_FIXTURE_STL_DIR="${CMAKE_SOURCE_DIR}/tests/cli/fixtures/stls"
     BAMBU_CLI_LOCAL_REFERENCE_3MF="${BAMBU_CLI_REFERENCE_3MF}"
     BAMBU_CLI_LOCAL_STL_DIR="${BAMBU_CLI_STL_DIR}"
+    BAMBU_CLI_SRC_DIR="${CMAKE_SOURCE_DIR}/src/cli"
 )
 add_dependencies(cli_tests bambu-cli)
 set_target_properties(cli_tests PROPERTIES
