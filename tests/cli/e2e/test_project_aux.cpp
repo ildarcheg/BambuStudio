@@ -162,6 +162,35 @@ TEST_CASE("aux export: exports file to directory", "[c3][aux_export]") {
     REQUIRE(fs::exists(fs::path(export_dir) / "assembly_smoke.txt"));
 }
 
+TEST_CASE("aux export: destination filename occupied by a directory -> "
+          "exit 1 usage_error, not a crash", "[c3][aux_export_dest_dir]") {
+    REQUIRE(fs::exists(kTxt));
+    const std::string out = fresh_temp_path(".3mf");
+    fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
+
+    spawn_cli({"project", "aux", "add", out,
+               "--folder", "assembly-guide", "--file", kTxt});
+
+    // Make <export_dir>/assembly_smoke.txt an existing DIRECTORY: copy_file
+    // to it must surface as a reported usage error, never as an unhandled
+    // boost::filesystem exception aborting the process.
+    const std::string export_dir = fresh_temp_path("");
+    fs::create_directories(fs::path(export_dir) / "assembly_smoke.txt");
+
+    auto r = spawn_cli({"--json", "project", "aux", "export", out,
+                        "--folder", "assembly-guide",
+                        "--name", "assembly_smoke.txt",
+                        "--to", export_dir});
+    INFO("stdout: " << r.stdout_text);
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("\"status\":\"error\"") != std::string::npos);
+    REQUIRE(r.stderr_text.find("\"code\":\"usage_error\"") != std::string::npos);
+
+    fs::remove_all(export_dir);
+    fs::remove(out);
+}
+
 TEST_CASE("aux export: unknown name -> exit 6", "[c3][aux_export_unknown]") {
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);

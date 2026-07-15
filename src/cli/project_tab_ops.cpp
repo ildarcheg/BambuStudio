@@ -367,7 +367,16 @@ void aux_export(ProjectState& state, AuxFolder folder,
         throw std::invalid_argument("destination parent directory does not exist: " +
                                     dest_parent.string());
 
-    fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
+    // Non-throwing overload: a bad --to destination (e.g. a directory
+    // squatting on the target filename, or a locked file) must surface as
+    // a usage error like the parent-missing case above — the aux command's
+    // catch handles invalid_argument, but a raw filesystem_error would
+    // escape it and abort the process.
+    boost::system::error_code copy_ec;
+    fs::copy_file(src, dest, fs::copy_options::overwrite_existing, copy_ec);
+    if (copy_ec)
+        throw std::invalid_argument("aux export failed writing '" + dest +
+                                    "': " + copy_ec.message());
 }
 
 } // namespace bambu_cli

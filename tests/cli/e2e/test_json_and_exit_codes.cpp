@@ -2,6 +2,7 @@
 
 #include <catch2/catch.hpp>
 #include <boost/filesystem.hpp>
+#include <fstream>
 #include <vector>
 #include <string>
 
@@ -107,5 +108,29 @@ TEST_CASE("exit codes 1, 2, 4, 5, 6, 9: deterministic triggers", "[m10][exit_cod
         REQUIRE(r.stderr_text.find("placement_failure") != std::string::npos);
     }
 
+    fs::remove(out);
+}
+
+TEST_CASE("save failure: stale .tmp.3mf directory -> exit 7 + JSON envelope, "
+          "not a crash", "[m10][exit_codes][io_errors]") {
+    const std::string out = fresh_temp_path("_stale.3mf");
+    fs::copy_file(canonical_committed_3mf(), out, fs::copy_options::overwrite_existing);
+
+    // Occupy the save scratch path with a non-empty directory. fs::remove()
+    // can't clear it, so the save must fail via the documented error
+    // envelope — not by letting a boost::filesystem exception escape to
+    // std::terminate (abort exit code, no JSON).
+    const std::string tmp = out + ".tmp.3mf";
+    fs::create_directory(tmp);
+    { std::ofstream f(tmp + "/occupant.txt"); f << "x"; }
+
+    auto r = spawn_cli({"--json", "plate", "add", out, "--name", "StaleTmpPlate"});
+    INFO("stdout: " << r.stdout_text);
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 7);
+    REQUIRE(r.stderr_text.find("\"status\":\"error\"") != std::string::npos);
+    REQUIRE(r.stderr_text.find("\"code\":\"invalid_state\"") != std::string::npos);
+
+    fs::remove_all(tmp);
     fs::remove(out);
 }

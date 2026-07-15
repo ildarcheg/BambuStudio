@@ -2,6 +2,7 @@
 // v1 entry point. Subcommands registered in commands/*.cpp.
 
 #include "extern/CLI11/CLI11.hpp"
+#include "exception_dispatch.hpp"
 #include "json_output.hpp"
 
 #include <iostream>
@@ -47,7 +48,25 @@ int main(int argc, char** argv) {
     bambu_cli::register_object_subcommands(app, &mode);
     bambu_cli::register_config_subcommands(app, &mode);
 
-    CLI11_PARSE(app, argc, argv);
+    // Subcommands execute inside parse() via CLI11 callbacks, so this is
+    // the process-wide exception boundary. CLI::ParseError keeps CLI11's
+    // own handling (what the bare CLI11_PARSE macro did); everything else
+    // is a last-resort backstop so no exception — e.g. an unexpected
+    // boost::filesystem_error from a disk-level failure — ever escapes to
+    // std::terminate (abort exit code, no error envelope).
+    try {
+        app.parse(argc, argv);
+    } catch (const CLI::ParseError& e) {
+        return app.exit(e);
+    } catch (const std::exception& e) {
+        auto d = bambu_cli::exception_dispatch::dispatch(e);
+        bambu_cli::emit_error(mode, d.code, d.message);
+        return d.exit_code;
+    } catch (...) {
+        bambu_cli::emit_error(mode, "invalid_state",
+                              "unhandled non-standard exception");
+        return 7;
+    }
 
     if (app.get_subcommands().empty()) {
         std::cout << app.help() << std::endl;

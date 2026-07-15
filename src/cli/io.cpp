@@ -23,6 +23,31 @@ namespace fs = boost::filesystem;
 
 namespace bambu_cli {
 
+// Best-effort scratch cleanup: never throws (error_code overload). Used on
+// error paths where a failing remove must not mask the original error —
+// io-boundary calls run outside every try block in the command envelope,
+// so a throwing overload here would escape straight to std::terminate.
+static void remove_quiet(const std::string& path) {
+    boost::system::error_code ec;
+    fs::remove(path, ec);
+}
+
+// Clear a stale scratch path without throwing. Non-recursive on purpose:
+// if a foreign directory tree squats on the scratch path it is not ours
+// to delete — report failure and let the caller surface an IoResult.
+// Returns true when the path is gone afterwards.
+static bool clear_stale_scratch(const std::string& path,
+                                std::string& detail) {
+    boost::system::error_code rm_ec, ex_ec;
+    fs::remove(path, rm_ec);
+    if (fs::exists(path, ex_ec)) {
+        detail = "cannot clear stale temp path: " + path +
+                 (rm_ec ? " (" + rm_ec.message() + ")" : "");
+        return false;
+    }
+    return true;
+}
+
 ProjectState::~ProjectState() {
     for (auto* p : plate_data) delete p;
     plate_data.clear();
@@ -75,7 +100,8 @@ static void rebuild_objects_and_instances(Slic3r::PlateDataPtrs& plates,
 
 IoResult load_project(const std::string& path, ProjectState& state) {
     IoResult r;
-    if (!fs::exists(path)) {
+    boost::system::error_code ex_ec;
+    if (!fs::exists(path, ex_ec)) {
         r.exit_code = to_int(ExitCode::file_not_found); r.error_code = "file_not_found";
         r.error_message = "project file not found: " + path;
         return r;
@@ -205,22 +231,37 @@ static bool rewrite_thumbnails(const std::string& archive_path,
     if (has_source) mz_zip_reader_end(&src_zip);
 
     if (!ok) {
-        fs::remove(new_path);
+        remove_quiet(new_path);
         return false;
     }
 
     boost::system::error_code ec;
     fs::remove(archive_path, ec);
-    fs::rename(new_path, archive_path);
+    fs::rename(new_path, archive_path, ec);
+    if (ec) {
+        remove_quiet(new_path);
+        return false;
+    }
     return true;
 }
 
 IoResult save_project(const ProjectState& state, const std::string& out_path) {
     IoResult r;
 
-    // 1. Atomic temp path
+    // 1. Atomic temp path. Clean any stale leftover via the non-throwing
+    //    helper: a locked file or a directory squatting on the scratch
+    //    path must surface as a reported IoResult, never as an escaping
+    //    boost::filesystem exception.
     const std::string tmp_path = out_path + ".tmp.3mf";
-    fs::remove(tmp_path);   // clean any stale leftover
+    {
+        std::string detail;
+        if (!clear_stale_scratch(tmp_path, detail)) {
+            r.exit_code = to_int(ExitCode::invalid_state);
+            r.error_code = "invalid_state";
+            r.error_message = detail;
+            return r;
+        }
+    }
 
     // 2. Populate per-plate thumbnails (G3).
     // ThumbnailData is populated on each PlateData and also passed as
@@ -249,7 +290,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
 
     bool ok = Slic3r::store_bbs_3mf(sp);
     if (!ok) {
-        fs::remove(tmp_path);
+        remove_quiet(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = "store_bbs_3mf returned false for: " + tmp_path;
         return r;
@@ -259,7 +300,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
     // thumbnails with the original PNG blobs from the source archive (if present),
     // or with synthesized valid PNGs for newly-added plates.
     if (!rewrite_thumbnails(tmp_path, state.source_path, state.plate_data)) {
-        fs::remove(tmp_path);
+        remove_quiet(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = "thumbnail rewrite failed for: " + tmp_path;
         return r;
@@ -268,7 +309,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
     // 4. Runtime invariant guard.
     GuardResult gr = run_guard(tmp_path, state);
     if (!gr.ok) {
-        fs::remove(tmp_path);
+        remove_quiet(tmp_path);
         r.exit_code = to_int(ExitCode::invariant_violation); r.error_code = "invariant_violation";
         r.error_message = "guard check '" + gr.failed_check + "' failed: " + gr.failure_detail;
         return r;
@@ -303,7 +344,7 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
             fs::remove(bak, rm_ec);   // best-effort; stale .bak is harmless
         }
     } catch (const std::exception& e) {
-        fs::remove(tmp_path);
+        remove_quiet(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = std::string("rename failed: ") + e.what();
         return r;
@@ -321,13 +362,21 @@ IoResult atomic_copy(const std::string& src, const std::string& dst) {
         return r;
     }
     const std::string tmp = dst + ".tmp.3mf";
-    fs::remove(tmp);
+    {
+        std::string detail;
+        if (!clear_stale_scratch(tmp, detail)) {
+            r.exit_code = to_int(ExitCode::invalid_state);
+            r.error_code = "invalid_state";
+            r.error_message = detail;
+            return r;
+        }
+    }
     try {
         fs::copy_file(src, tmp, fs::copy_options::overwrite_existing);
         if (fs::exists(dst)) fs::remove(dst);
         fs::rename(tmp, dst);
     } catch (const std::exception& e) {
-        fs::remove(tmp);
+        remove_quiet(tmp);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = std::string("atomic_copy failed: ") + e.what();
         return r;
