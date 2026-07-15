@@ -91,8 +91,10 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
   the 2.07 or 2.08 lines and were not reintroduced by any port: the
   `alternate_extra_wall` print feature and the camera-fullscreen GUI
   feature.
-- Not pushed to `origin` yet — `origin/master` still points at the old
-  (pre-port) history.
+- Pushed to `origin` on 2026-07-14: `origin/master` = the GA port tip,
+  `origin/port-cli-v2.08` = the parked 2.08 port, and the
+  `archive/v2.7-cli` tag (pushed first, so the pre-port history stays
+  reachable on the remote).
 - Last `cli_tests` run: **447 cases / 4271 assertions, all green** on
   the `v02.07.01.62`-ported tree (3 runs, incl. one randomized test
   order) — identical counts to the pre-port 2.7-era baseline (post-M12)
@@ -126,19 +128,13 @@ FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
     `docs/cli/status.md`.
 - Working tree is clean as of this CLAUDE.md write.
 
-## Push guidance (not yet executed — user's call)
-`master` was reset locally to the `port-cli-v2.07.01` tip; `origin/master`
-still has the old pre-port history. Publishing requires, **in this
-order**:
-1. `git push origin archive/v2.7-cli` — hard precondition, preserves
-   the entire 2.7-era lineage on the remote before it becomes
-   unreachable from `origin/master`.
-2. `git push origin port-cli-v2.08` — preserves the parked 2.08 port
-   on the remote too, since it is reachable only from a branch (not
-   `master`) once this retarget lands.
-3. `git push --force-with-lease origin master` — rewrites
-   `origin/master` to the `v02.07.01.62`-based port tip.
-Do not do step 3 without steps 1 and 2 first.
+## Push record (executed 2026-07-14, user-approved)
+Published in the required order: (1) `git push origin
+archive/v2.7-cli` (tag first — preserves the entire 2.7-era lineage on
+the remote), (2) `git push --force-with-lease origin master`
+(rewrote `origin/master` from the old pre-port history to the
+`v02.07.01.62`-based port), (3) `git push origin port-cli-v2.08`
+(parks the 2.08 beta port remotely). Verified via `git ls-remote`.
 
 ## File layout
 - `src/cli/` — entry (`main.cpp`), `io.{hpp,cpp}`,
