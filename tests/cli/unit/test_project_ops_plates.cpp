@@ -91,3 +91,21 @@ TEST_CASE("list_plate_names: returns names in plate_data order",
     REQUIRE(names[1] == "Plate-2");
     REQUIRE(names[2] == "Plate-3");
 }
+
+TEST_CASE("remove_plate: non-empty plate -> InvalidStateError (not "
+          "unknown_reference)", "[unit][plates]") {
+    // The plate EXISTS but is not empty — a script must be able to tell
+    // this apart from "plate not found" (out_of_range -> exit 6) by exit
+    // code. Non-empty removal is an invalid-state condition (exit 7).
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    REQUIRE(bambu_cli::add_plate(s, "NonEmpty").ok);
+    bambu_cli::ManualTransform tf;
+    tf.has_translate = true; tf.tx = 50; tf.ty = 50; tf.tz = 0;
+    bambu_cli::ObjectRef ref;
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, "NonEmpty", bambu_cli_unit::fixture_stl("cube.stl"),
+        "NonEmptyCube", -1, &tf, 1, &ref).ok);
+    REQUIRE_THROWS_AS(bambu_cli::remove_plate(s, "NonEmpty"),
+                      bambu_cli::InvalidStateError);
+}

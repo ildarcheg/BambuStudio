@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -309,6 +310,20 @@ std::string sanitize_aux_name(const std::string& raw) {
     return raw;
 }
 
+// Byte-level file comparison for the idempotent re-add check. Size check
+// first (cheap), then full content compare. Never throws: errors report
+// "not identical", which fails safe into the collision path.
+static bool files_identical(const std::string& a, const std::string& b) {
+    boost::system::error_code ec_a, ec_b;
+    const auto size_a = fs::file_size(a, ec_a);
+    const auto size_b = fs::file_size(b, ec_b);
+    if (ec_a || ec_b || size_a != size_b) return false;
+    std::ifstream fa(a, std::ios::binary), fb(b, std::ios::binary);
+    if (!fa || !fb) return false;
+    std::istreambuf_iterator<char> ia(fa), ib(fb), end;
+    return std::equal(ia, end, ib);
+}
+
 std::string aux_add(ProjectState& state, const AuxAddParams& p) {
     // Source must exist.
     if (!fs::exists(p.file_path))
@@ -329,9 +344,10 @@ std::string aux_add(ProjectState& state, const AuxAddParams& p) {
     // Check for collision.
     if (fs::exists(dest_file)) {
         if (!p.force) {
-            // Byte-identical re-add is exit 0.
-            if (fs::file_size(p.file_path) == fs::file_size(dest_file)) {
-                // Considered identical for idempotent re-add: just succeed.
+            // Byte-identical re-add is exit 0. Content comparison, not
+            // size: a same-size, different-content re-add must collide,
+            // or the project silently keeps the stale bytes.
+            if (files_identical(p.file_path, dest_file)) {
                 return "added " + name + " to " + folder_flag(p.folder);
             }
             throw AuxCollisionError("aux name already exists: " + name);

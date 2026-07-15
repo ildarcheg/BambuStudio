@@ -57,6 +57,14 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// The referenced entity exists but is in a state that forbids the
+// operation (e.g. removing a non-empty plate). Distinguishes "found but
+// not allowed" from "not found" (std::out_of_range -> exit 6). -> exit 7.
+class InvalidStateError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 // ============================================================
 // Derived exceptions (Phase C — project-tab operations)
 // ============================================================

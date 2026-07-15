@@ -68,8 +68,11 @@ OpResult remove_plate(ProjectState& state, const std::string& name) {
     if (idx < 0)
         throw std::out_of_range("plate '" + name + "' not found");
     Slic3r::PlateData* pd = state.plate_data[static_cast<size_t>(idx)];
+    // The plate exists but is not empty: InvalidStateError (exit 7), so a
+    // script can tell this apart from "plate not found" (out_of_range ->
+    // exit 6) by exit code alone.
     if (!pd->objects_and_instances.empty())
-        throw std::out_of_range("plate '" + name + "' is not empty (" +
+        throw InvalidStateError("plate '" + name + "' is not empty (" +
                                 std::to_string(pd->objects_and_instances.size()) +
                                 " instance(s)); remove objects first");
     delete pd;

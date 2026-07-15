@@ -40,7 +40,7 @@ compile_commands.json
 **/dist/
 
 
-# CLI manual GUI smoke outputs (transient — produced by docs/cli/manual-test.md recipe)
+# CLI manual GUI smoke outputs (transient - produced by docs/cli/manual-test.md recipe)
 /smoke-out/
 
 # Local smoke-test artifacts produced via docs/cli/manual-test.md walkthroughs.

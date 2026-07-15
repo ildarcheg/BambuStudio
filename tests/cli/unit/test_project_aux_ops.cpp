@@ -4,6 +4,7 @@
 #include "exceptions.hpp"
 
 #include <boost/filesystem.hpp>
+#include <fstream>
 
 using bambu_cli::ProjectState;
 namespace fs = boost::filesystem;
@@ -212,4 +213,37 @@ TEST_CASE("aux_list: file added under Profile Pictures is enumerated",
         }
     }
     REQUIRE(saw);
+}
+
+TEST_CASE("aux_add: same-size different-content re-add without force -> "
+          "AuxCollisionError", "[unit][c3][aux_add]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+
+    // Two files with identical size but different bytes: a size-only
+    // idempotency check reports "added" and silently keeps the stale
+    // content. Only a byte-identical re-add may be treated as idempotent.
+    const auto dir = fs::temp_directory_path();
+    const std::string f1 = (dir / "bambu_cli_aux_same_a.bin").string();
+    const std::string f2 = (dir / "bambu_cli_aux_same_b.bin").string();
+    { std::ofstream a(f1, std::ios::binary); a << "AAAA"; }
+    { std::ofstream b(f2, std::ios::binary); b << "AAAB"; }
+
+    bambu_cli::AuxAddParams p;
+    p.folder    = bambu_cli::AuxFolder::Others;
+    p.file_path = f1;
+    p.name      = "same_size.bin";
+    REQUIRE_NOTHROW(bambu_cli::aux_add(s, p));
+
+    bambu_cli::AuxAddParams p2;
+    p2.folder    = bambu_cli::AuxFolder::Others;
+    p2.file_path = f2;
+    p2.name      = "same_size.bin";
+    REQUIRE_THROWS_AS(bambu_cli::aux_add(s, p2), bambu_cli::AuxCollisionError);
+
+    // Byte-identical re-add stays an idempotent success.
+    REQUIRE_NOTHROW(bambu_cli::aux_add(s, p));
+
+    fs::remove(f1);
+    fs::remove(f2);
 }

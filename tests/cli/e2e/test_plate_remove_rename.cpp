@@ -59,7 +59,8 @@ TEST_CASE("plate remove: empty plate is removed", "[m8][plate_remove]") {
     fs::remove(out);
 }
 
-TEST_CASE("plate remove: non-empty plate -> exit 6", "[m8][plate_remove]") {
+TEST_CASE("plate remove: non-empty plate -> exit 7 invalid_state",
+          "[m8][plate_remove]") {
     const std::string out = fresh_temp_path(".3mf");
     fs::copy_file(canonical_committed_3mf(), out, fs::copy_option::overwrite_if_exists);
 
@@ -75,11 +76,13 @@ TEST_CASE("plate remove: non-empty plate -> exit 6", "[m8][plate_remove]") {
     INFO("object add stderr: " << add_obj_r.stderr_text);
     REQUIRE(add_obj_r.exit_code == 0);
 
-    // Attempt to remove the non-empty plate -> must fail with exit 6.
+    // Attempt to remove the non-empty plate. The plate EXISTS — this must
+    // be distinguishable from "plate not found" (exit 6) by exit code:
+    // a not-empty removal is an invalid-state condition, exit 7.
     auto rem_r = spawn_cli({"plate", "remove", out, "--name", "with-object"});
     INFO("plate remove stderr: " << rem_r.stderr_text);
-    REQUIRE(rem_r.exit_code == 6);
-    REQUIRE(rem_r.stderr_text.find("unknown_reference") != std::string::npos);
+    REQUIRE(rem_r.exit_code == 7);
+    REQUIRE(rem_r.stderr_text.find("invalid_state") != std::string::npos);
 
     fs::remove(out);
 }

@@ -127,6 +127,13 @@ recommendation R6.
 - Exit-code inconsistencies: non-empty `plate remove` → exit 6
   instead of 7 (`project_ops.cpp:71`); filament-slot-out-of-range is
   exit 1 in some verbs, 6 in others (`project_ops.cpp:399,571,1011`).
+  (Resolution 2026-07-15: `plate remove` fixed to exit 7 via a new
+  typed `InvalidStateError`. merge-parts' exit 6 for filament range is
+  left as-is — it is deliberately pinned by unit + e2e tests
+  ("step e", `test_object_merge.cpp:86`) as part of the M12 contract,
+  and its `invalid_argument → 7` override means no existing exception
+  type maps it to exit 1; changing it would break the published CLI
+  contract for a LOW-severity nit.)
 - Exception-override maps match exact `typeid`
   (`exception_dispatch.cpp:20`), so `std::runtime_error` subclasses
   (e.g. `Slic3r::RuntimeError`) escape the auto-orient exit-7 remap

@@ -13,7 +13,7 @@ the `cli_tests` Catch2 binary link it (no drift). All mutations go
 through libslic3r's own `load_bbs_3mf` / `store_bbs_3mf` / `Model` /
 `DynamicPrintConfig` / `PlateData` / `print_config_def` — no upstream
 monkey-patching, no `#ifdef`s, only an `add_subdirectory(cli)` hook in
-`src/CMakeLists.txt:28` and `tests/CMakeLists.txt:39`. Save path is a
+`src/CMakeLists.txt:28` and `tests/CMakeLists.txt:38`. Save path is a
 `.bak`-swap atomic pattern (ported from OrcaSlicer M11) in
 `src/cli/io.cpp:284-310` with a three-check post-write invariant guard
 (rels target resolution / per-plate thumbnails / vector-config

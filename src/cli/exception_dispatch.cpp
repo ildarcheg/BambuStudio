@@ -28,6 +28,7 @@ Dispatched dispatch(const std::exception& e,
     if (dynamic_cast<const DuplicateNameError*>(&e))    return {to_int(ExitCode::duplicate_name),      "duplicate_name",      e.what()};
     if (dynamic_cast<const FileNotFoundError*>(&e))     return {to_int(ExitCode::file_not_found),      "file_not_found",      e.what()};
     if (dynamic_cast<const InvariantViolation*>(&e))    return {to_int(ExitCode::invariant_violation), "invariant_violation", e.what()};
+    if (dynamic_cast<const InvalidStateError*>(&e))     return {to_int(ExitCode::invalid_state),       "invalid_state",       e.what()};
 
     // std::invalid_argument and std::out_of_range derive from std::logic_error,
     // NOT std::runtime_error, so they don't collide with the catch-all below.
