@@ -1378,15 +1378,21 @@ OpResult plate_arrange(ProjectState& state, const std::string& plate_name) {
                                plate_name + "'");
 
     // Apply: translate bed-local result back to world via plate_origin.
+    // items[k].rotation is a Z-only *delta* relative to the transform that
+    // was baked into the hull (get_arrange_polygon reports rotation = 0),
+    // so it must be composed, not assigned — apply_arrange_result rotates
+    // about UnitZ on top of the existing rotation and sets scaled X/Y,
+    // leaving the Z offset untouched (Model.cpp:4276).
     for (size_t k = 0; k < pairs.size(); ++k) {
         const auto& [oi, ii] = pairs[k];
         auto* inst = state.model.objects[oi]->instances[ii];
-        const auto cur = inst->get_offset();
-        inst->set_offset(Slic3r::Vec3d(
-            info.world_origin.x() + Slic3r::unscaled<double>(items[k].translation.x()),
-            info.world_origin.y() + Slic3r::unscaled<double>(items[k].translation.y()),
-            cur.z()));
-        inst->set_rotation(Slic3r::Vec3d(0, 0, items[k].rotation));
+        inst->apply_arrange_result(
+            Slic3r::Vec2d(
+                items[k].translation.x() +
+                    Slic3r::scaled<double>(info.world_origin.x()),
+                items[k].translation.y() +
+                    Slic3r::scaled<double>(info.world_origin.y())),
+            items[k].rotation);
     }
     OpResult r; r.ok = true; return r;
 }

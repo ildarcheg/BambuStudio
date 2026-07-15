@@ -336,6 +336,30 @@ TEST_CASE("plate_arrange: two overlapping copies become non-overlapping",
     REQUIRE_FALSE((x_overlap && y_overlap));
 }
 
+TEST_CASE("plate_arrange: preserves existing instance tilt (rotation composed, "
+          "not reset)", "[unit][plate_layout]") {
+    ProjectState s;
+    bambu_cli_unit::load_reference_into(s);
+    auto [oi, ii] = add_cube_at(s, REF_PLATE_1, Slic3r::Vec3d(50, 50, 0));
+    auto* inst = s.model.objects[oi]->instances[ii];
+    // Tilt 45° about X: the world bbox Z-extent of the fixture cube grows
+    // by ~sqrt(2). The arrange engine returns a Z-only rotation *delta*
+    // (get_arrange_polygon bakes the current transform into the hull and
+    // reports rotation = 0; apply_arrange_result composes the delta about
+    // UnitZ — Model.cpp:4276), so the tilt — and with it the Z-extent —
+    // must survive arrange. An absolute reset to (0, 0, rz) flattens the
+    // cube back upright.
+    inst->set_rotation(Slic3r::Vec3d(M_PI * 0.25, 0, 0));
+    const double pre_z_extent =
+        s.model.objects[oi]->instance_bounding_box(ii, false).size().z();
+
+    REQUIRE(bambu_cli::plate_arrange(s, REF_PLATE_1).ok);
+
+    const double post_z_extent =
+        s.model.objects[oi]->instance_bounding_box(ii, false).size().z();
+    REQUIRE(post_z_extent == Approx(pre_z_extent).margin(0.01));
+}
+
 TEST_CASE("plate_arrange: empty plate is success no-op",
           "[unit][plate_layout]") {
     ProjectState s;
