@@ -182,3 +182,30 @@ TEST_CASE("object add --count N: N ModelObjects, correct list rows [M6 hotfix]",
 
     fs::remove(out);
 }
+
+TEST_CASE("object add: malformed --translate values -> exit 1 usage_error",
+          "[m6][transforms][usage]") {
+    const std::string out = fresh_temp_path(".3mf");
+    fs::copy_file(canonical_committed_3mf(), out, fs::copy_option::overwrite_if_exists);
+    const std::string stl   = std::string(BAMBU_CLI_FIXTURE_STL_DIR) + "/cube.stl";
+    const std::string plate = first_plate_name(out);
+
+    // Trailing garbage: stod-based parsing silently truncated "10x" to 10
+    // and the command exited 0, translating by the wrong amount.
+    auto r = spawn_cli({"--json", "object", "add", out, "--plate", plate,
+                        "--stl", stl, "--translate", "10x,20,0"});
+    INFO("stdout: " << r.stdout_text);
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("bad --translate") != std::string::npos);
+
+    // Overflow: stod threw std::out_of_range, which the dispatch table
+    // maps to exit 6 unknown_reference — wrong class for a bad flag value.
+    auto r2 = spawn_cli({"--json", "object", "add", out, "--plate", plate,
+                         "--stl", stl, "--translate", "1e999,0,0"});
+    INFO("stderr: " << r2.stderr_text);
+    REQUIRE(r2.exit_code == 1);
+    REQUIRE(r2.stderr_text.find("\"code\":\"usage_error\"") != std::string::npos);
+
+    fs::remove(out);
+}

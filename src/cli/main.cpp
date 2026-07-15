@@ -3,10 +3,12 @@
 
 #include "extern/CLI11/CLI11.hpp"
 #include "exception_dispatch.hpp"
+#include "exit_codes.hpp"
 #include "json_output.hpp"
 
 #include <iostream>
 #include <cstdlib>
+#include <cstring>
 #include <boost/filesystem.hpp>
 #include <libslic3r/Utils.hpp>
 
@@ -56,8 +58,27 @@ int main(int argc, char** argv) {
     // std::terminate (abort exit code, no error envelope).
     try {
         app.parse(argc, argv);
-    } catch (const CLI::ParseError& e) {
+    } catch (const CLI::CallForHelp& e) {
+        return app.exit(e);          // --help is not an error: exit 0
+    } catch (const CLI::CallForAllHelp& e) {
         return app.exit(e);
+    } catch (const CLI::CallForVersion& e) {
+        return app.exit(e);          // --version likewise
+    } catch (const CLI::ParseError& e) {
+        // Real usage errors: CLI11's own exit codes (RequiredError = 106,
+        // ExtrasError = 108, ...) and plain-text usage dump violate the
+        // documented exit-code table (1 = usage_error) and the --json
+        // contract. Remap to exit 1 + Shape A envelope. `mode` may not be
+        // set yet if parsing failed before the --json flag was processed,
+        // so scan argv directly.
+        bambu_cli::OutputMode err_mode = mode;
+        for (int i = 1; i < argc; ++i)
+            if (std::strcmp(argv[i], "--json") == 0)
+                err_mode = bambu_cli::OutputMode::Json;
+        std::string msg = e.what();
+        bambu_cli::emit_error(err_mode, "usage_error",
+                              msg.empty() ? e.get_name() : msg);
+        return bambu_cli::to_int(bambu_cli::ExitCode::usage_error);
     } catch (const std::exception& e) {
         auto d = bambu_cli::exception_dispatch::dispatch(e);
         bambu_cli::emit_error(mode, d.code, d.message);

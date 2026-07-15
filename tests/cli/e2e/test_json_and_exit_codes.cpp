@@ -134,3 +134,31 @@ TEST_CASE("save failure: stale .tmp.3mf directory -> exit 7 + JSON envelope, "
     fs::remove_all(tmp);
     fs::remove(out);
 }
+
+TEST_CASE("CLI11 usage errors: exit 1 + Shape A envelope; help/version "
+          "still exit 0", "[m10][exit_codes][usage]") {
+    const std::string f = canonical_committed_3mf();
+
+    // Missing required --name: CLI11's RequiredError exits with CLI11's
+    // own code (106) and plain-text usage, violating the documented
+    // exit-code table (1 = usage_error) and the --json contract.
+    auto r = spawn_cli({"--json", "plate", "add", f});
+    INFO("stdout: " << r.stdout_text);
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("\"status\":\"error\"") != std::string::npos);
+    REQUIRE(r.stderr_text.find("\"code\":\"usage_error\"") != std::string::npos);
+
+    // Text mode gets the same exit code with a readable message.
+    auto r2 = spawn_cli({"plate", "add", f});
+    REQUIRE(r2.exit_code == 1);
+    REQUIRE(r2.stderr_text.find("usage_error") != std::string::npos);
+
+    // Unknown option.
+    auto r3 = spawn_cli({"--json", "inspect", f, "--frobnicate"});
+    REQUIRE(r3.exit_code == 1);
+
+    // Help and version are not errors and keep exiting 0.
+    REQUIRE(spawn_cli({"--help"}).exit_code == 0);
+    REQUIRE(spawn_cli({"--version"}).exit_code == 0);
+}

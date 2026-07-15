@@ -6,6 +6,9 @@
 #include "../extern/CLI11/CLI11.hpp"
 #include "mutation_runner.hpp"
 
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <typeindex>
@@ -13,20 +16,43 @@
 
 namespace bambu_cli {
 
+// Parse one full token as a finite double. Rejects empty tokens, trailing
+// garbage ("10x"), and out-of-range values ("1e999") — stod-based parsing
+// silently truncated the former and threw std::out_of_range (exit 6,
+// wrong class) on the latter. Never throws.
+static bool parse_double_strict(const std::string& tok, double& out) {
+    if (tok.empty()) return false;
+    errno = 0;
+    char* end = nullptr;
+    const double v = std::strtod(tok.c_str(), &end);
+    if (end != tok.c_str() + tok.size()) return false;
+    if (errno == ERANGE || !std::isfinite(v)) return false;
+    out = v;
+    return true;
+}
+
 // Parse "x,y[,z]" or uniform "s" into three doubles.
 // z_default is used when only 2 values are provided (translate/rotate use 0,
 // scale uses 1).
-// Returns false if the string is malformed.
+// Returns false if the string is malformed. Never throws — the caller owns
+// the contextual invalid_argument ("bad --translate: ...").
 static bool parse_triple(const std::string& s, double& x, double& y, double& z,
                          double z_default) {
     if (s.empty()) return false;
     std::vector<double> v;
     std::string cur;
+    double parsed = 0.0;
     for (char c : s) {
-        if (c == ',') { v.push_back(std::stod(cur)); cur.clear(); }
+        if (c == ',') {
+            if (!parse_double_strict(cur, parsed)) return false;
+            v.push_back(parsed); cur.clear();
+        }
         else cur += c;
     }
-    if (!cur.empty()) v.push_back(std::stod(cur));
+    if (!cur.empty()) {
+        if (!parse_double_strict(cur, parsed)) return false;
+        v.push_back(parsed);
+    }
     if (v.size() == 1) { x = y = z = v[0]; return true; }   // uniform (e.g. scale)
     if (v.size() == 2) { x = v[0]; y = v[1]; z = z_default; return true; }
     if (v.size() == 3) { x = v[0]; y = v[1]; z = v[2]; return true; }

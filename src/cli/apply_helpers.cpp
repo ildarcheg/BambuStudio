@@ -54,11 +54,18 @@ bool read_axis_object(const nlohmann::json& section,
     out_x = out_y = out_z = default_v;
     for (auto it = section.begin(); it != section.end(); ++it) {
         const std::string& key = it.key();
+        if (key != "x" && key != "y" && key != "z")
+            throw bambu_cli::ManifestFieldError(std::string("unknown axis key '") + key +
+                                      "' on '" + section_name + "'");
+        // Type-check before get<double>(): a schema-shape mistake must ride
+        // the ManifestFieldError -> exit 1 rail, not escape as nlohmann
+        // json::type_error (which the dispatch catch-all maps to exit 3).
+        if (!it.value().is_number())
+            throw bambu_cli::ManifestFieldError(std::string("axis '") + key + "' on '" +
+                                      section_name + "' must be a number");
         if      (key == "x") out_x = it.value().get<double>();
         else if (key == "y") out_y = it.value().get<double>();
-        else if (key == "z") out_z = it.value().get<double>();
-        else throw bambu_cli::ManifestFieldError(std::string("unknown axis key '") + key +
-                                      "' on '" + section_name + "'");
+        else                 out_z = it.value().get<double>();
     }
     return true;
 }

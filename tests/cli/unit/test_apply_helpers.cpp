@@ -145,3 +145,18 @@ TEST_CASE("parse_transform: translate as number throws",
     json step = {{"translate", 5}};
     REQUIRE_THROWS_AS(parse_transform(step), ManifestFieldError);
 }
+
+TEST_CASE("parse_transform: non-numeric axis value -> ManifestFieldError",
+          "[apply_helpers][parse_transform]") {
+    // A string where a number belongs is a schema-shape error and must ride
+    // the ManifestFieldError -> exit 1 rail, not escape as nlohmann
+    // json::type_error (which the dispatch catch-all maps to exit 3).
+    json step = {{"translate", {{"x", "10"}}}};
+    REQUIRE_THROWS_AS(bambu_cli::parse_transform(step), ManifestFieldError);
+}
+
+TEST_CASE("parse_transform: boolean axis value -> ManifestFieldError",
+          "[apply_helpers][parse_transform]") {
+    json step = {{"rotate", {{"z", true}}}};
+    REQUIRE_THROWS_AS(bambu_cli::parse_transform(step), ManifestFieldError);
+}
