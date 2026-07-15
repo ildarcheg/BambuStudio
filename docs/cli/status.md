@@ -622,28 +622,49 @@ Spec: `docs/superpowers/specs/2026-05-31-project-apply-batch-design.md`
 Plan: `docs/superpowers/plans/2026-05-31-project-apply-batch.md`
 Range: `029c51e85..7777688ab` (28 commits — 27 plan tasks + 1 polish fix `7777688ab` resolving final-review Issues 1 + 2 on optional-field type-checks and missing happy-path tests). Merge commit: `31529bf6e`.
 
-## 2026-07-14 — Port to upstream v02.08.00.50
+## 2026-07-14 — Port to upstream v02.07.01.62 (latest GA)
 
 Ports the entire `bambu-cli` effort (M0 through M12, all lettered
 Phases, and both convergence rounds) from the prior 2.7-era base onto
-upstream tag `v02.08.00.50`.
+upstream tag `v02.07.01.62`.
 
 Spec: `docs/superpowers/specs/2026-07-14-port-cli-v208-design.md`
 Plan: `docs/superpowers/plans/2026-07-14-port-cli-v208.md`
+(both written for the original `v02.08.00.50` target and re-executed
+unchanged — same playbook — against `v02.07.01.62`; see "Retarget
+story" below.)
+
+### Retarget story
+
+The port was first done, and fully completed and verified, against
+upstream tag `v02.08.00.50` earlier the same day (2026-07-14). Before
+adopting it as `master`, GitHub's release metadata was checked and
+showed `v02.08.00.50` and the newer `v02.08.01.55` both marked
+`prerelease=true` — the 2.08 line is a beta/prerelease line, not yet
+generally available. `v02.07.01.62` (published 2026-06-16) is the
+latest release with `prerelease=false` — the latest public GA release.
+
+Policy decision: `master` tracks the latest **GA** release, not the
+latest tag. The 2.08 port was therefore re-targeted the same day: the
+same playbook (spec + plan above) was re-executed against
+`v02.07.01.62` instead. The completed 2.08 work was not discarded —
+it is parked on branch `port-cli-v2.08` (tip `2e8ac75e6`) with its own
+build dir (`build_v208`) and deps (`BambuStudio_dep_v208`) intact, to
+be revisited when the 2.08 line goes GA.
 
 ### What carried
 
 - All of `src/cli/` and `tests/cli/` — every command, every typed
   exception, every test file — carried forward **unchanged**.
 - All sibling-fork divergence notes (profile storage, aux folder
-  names, CLI link surface / stubs) — still accurate on `v02.08.00.50`.
+  names, CLI link surface / stubs) — still accurate on `v02.07.01.62`.
 - `docs/cli/`, `docs/superpowers/specs/`, `docs/superpowers/plans/` —
   full history retained.
 
 ### What was dropped (named)
 
 Two upstream features present in the old (2.7-era) lineage do not
-exist on the `v02.08.00.50` line and were **not** reintroduced by the
+exist on the `v02.07.01.62` line and were **not** reintroduced by the
 port (they are unrelated to `bambu-cli` and out of scope for this
 effort):
 
@@ -661,48 +682,50 @@ tag (`6cb539d2f`), which is `201` commits past `v02.07.00.55`
   `arrangement::arrange` + `update_arrange_params` +
   `update_selected_items_inflation` + `get_shrink_bedpts`
   (`Arrange.hpp`), and `orientation::orient` (`Orient.hpp`) are
-  API-unchanged between the old base and `v02.08.00.50`. The CLI's
+  API-unchanged between the old base and `v02.07.01.62`. The CLI's
   link-surface narrowing (`stubs_for_libslic3r.cpp` no-opping
   `Slic3r::Http`, `BBL_Encrypt`, `LogSink`) is still both necessary
   (upstream's `libslic3r` still references `LogSink`) and sufficient
   (nothing new pulls in `Http` at CLI link time).
-- **4 CMake portability fixes were needed** (commit `f53dca7cb`) —
-  min-CMake-version bumps and an explicit `Freetype::Freetype` link
-  target — required for 2.08's stricter/updated CMake baseline. These
-  are build-graph fixes only; no CLI logic changed.
+- **4 CMake portability fixes were carried over** (commit
+  `6243afa37`) from the 2.08 attempt — min-CMake-version bumps and an
+  explicit `Freetype::Freetype` link target. Re-applied cleanly on
+  `v02.07.01.62`; build-graph fixes only, no CLI logic changed.
 - **`add_subdirectory(cli)` hooks needed re-applying** (commit
-  `3426e99b1`) in `src/CMakeLists.txt` and `tests/CMakeLists.txt`,
+  `6b76fb2c1`) in `src/CMakeLists.txt` and `tests/CMakeLists.txt`,
   since those files are upstream-owned and the port re-applies onto a
-  fresh checkout of `v02.08.00.50` rather than merging.
-- **Deps/build environment changed** (Windows), independent of any
-  CLI code:
-  - New deps dir `BambuStudio_dep_v208`, built via
-    `build_win.bat -d <dir> -s deps -v 16` (~14 min). `-v 16` is
-    mandatory on this box — 2.08's `build_win.bat` otherwise
-    auto-selects the newest installed VS (2026) and then demands
-    CMake ≥ 4.2.
-  - FFMPEG `.pc` patch scope grew: not just `prefix=` but also the
-    hardcoded-relative `libdir=./dist/lib` /
-    `includedir=./dist/include` lines in the 7 `lib*.pc` FFMPEG files,
-    rewritten to `${prefix}/lib` / `${prefix}/include` (otherwise
-    CMake generate fails on `libslic3r_gui`'s relative include path).
-  - New build dir `build_v208`, configured with
-    `-DCMAKE_PREFIX_PATH=.../BambuStudio_dep_v208/usr/local
+  fresh checkout of `v02.07.01.62` rather than merging.
+- **Deps/build environment: no rebuild needed** (Windows) — this is
+  the key practical difference from the 2.08 attempt. The **existing**
+  2.7-era deps dir, `C:\Users\ildarcheg\Documents\GitHub\BambuStudio_dep`,
+  works unchanged against `v02.07.01.62`; none of the 2.08-specific
+  deps work (`BambuStudio_dep_v208`, the FFMPEG `.pc` relative-path
+  patch, `-v 16` VS pinning for a deps rebuild) was needed here.
+  - Build dir: `build_v20701`, configured with
+    `cmake -S . -B build_v20701
+    -DCMAKE_PREFIX_PATH=".../BambuStudio_dep/usr/local"
     -DSLIC3R_BUILD_TESTS=ON
-    -DPKG_CONFIG_EXECUTABLE=C:/Strawberry/perl/bin/pkg-config.bat` —
-    2.08 newly requires `pkg-config` at configure time, and without
-    the explicit `-D`, CMake picks Strawberry's extensionless `perl`
-    script and configure fails.
-  - `cli_tests.exe` has no `POST_BUILD` DLL-copy step under 2.08; run
-    with `build_v208\src\cli\Release` and the `occt` DLL dir prepended
-    to `PATH`, else `0xC0000135`.
+    -DPKG_CONFIG_EXECUTABLE=C:/Strawberry/perl/bin/pkg-config.bat`.
+    `v02.07.01.62` has `find_package(PkgConfig REQUIRED)`, so the `-D`
+    is mandatory (without it, CMake picks Strawberry's extensionless
+    `perl` script and configure fails).
+  - `build_win.bat` on this tag auto-selects the newest installed VS
+    (VS 2026 on this box); a future *deps* rebuild would need `-v 16`,
+    but none was required this time.
+  - `cli_tests.exe` has no `POST_BUILD` DLL-copy step; run with
+    `build_v20701\src\cli\Release` and its `occt` DLL dir prepended to
+    `PATH`.
+  - Machine note: Windows Smart App Control blocked freshly built
+    exes (CodeIntegrity `0xC0E90002`) until the user disabled it on
+    2026-07-14.
 
 ### Test counts
 
 - `cli_tests`: **447 cases / 4271 assertions, all green** — 3 runs on
-  the ported tree, including one randomized test order. Identical
-  counts to the pre-port 2.7-era baseline (post-M12); no regressions,
-  no new failures, no skipped tests.
+  the `v02.07.01.62`-ported tree, including one randomized test order.
+  Identical counts to the pre-port 2.7-era baseline (post-M12) and to
+  the parked 2.08 port. No regressions, no new failures, no skipped
+  tests.
 - E2E smoke (manual, via `bambu-cli.exe` directly): `project init`
   from `tests/cli/fixtures/test_reference.3mf`, then `inspect` →
   plates:1 objects:1 filaments:4; re-init from the CLI's own output →
@@ -710,19 +733,20 @@ tag (`6cb539d2f`), which is `201` commits past `v02.07.00.55`
 
 ### Smoke-gate (Layer 2 / Bambu Studio)
 
-`[ ]` — pending. No 2.08-produced 3MF has yet been opened in Bambu
-Studio 2.08 for manual sign-off. This is a new, not-yet-closed open
-item (see `CLAUDE.md` "Open items").
+`[ ]` — pending. No `v02.07.01.62`-produced 3MF has yet been opened in
+Bambu Studio (GA) for manual sign-off. This is a new, not-yet-closed
+open item (see `CLAUDE.md` "Open items").
 
 ### Commits
 
-- `2ea7b3f90` — port(cli): bambu-cli tree from `archive/v2.7-cli` onto
-  `v02.08.00.50`
-- `3426e99b1` — port(cli): re-apply `add_subdirectory(cli)` hooks in
+- `264000a80` — port(cli): bambu-cli tree onto `v02.07.01.62` (latest
+  GA)
+- `6b76fb2c1` — port(cli): re-apply `add_subdirectory(cli)` hooks in
   `src/` and `tests/`
-- `f53dca7cb` — build: re-apply CMake portability fixes (min-version
+- `6243afa37` — build: re-apply CMake portability fixes (min-version
   bumps + `Freetype::Freetype`)
 
-Base tag: `v02.08.00.50` (`a78684a11`). Archive tag: `archive/v2.7-cli`
-(`6cb539d2f`, 201 commits past `v02.07.00.55`). Port branch:
-`port-cli-v2.08`.
+Base tag: `v02.07.01.62` (`42d319c66`). Archive tag: `archive/v2.7-cli`
+(`6cb539d2f`, 201 commits past `v02.07.00.55`). Parked prerelease
+port: `port-cli-v2.08` (tip `2e8ac75e6`, base tag `v02.08.00.50` /
+`a78684a11`). Port branch (this entry): `port-cli-v2.07.01`.
