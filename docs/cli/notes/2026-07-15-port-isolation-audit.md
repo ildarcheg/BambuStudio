@@ -104,7 +104,11 @@ recommendation R6.
   (`src/cli/project_tab_ops.cpp:330-338`): re-adding a same-size,
   different-content file reports "added", exits 0, silently keeps
   stale bytes.
-- **M5.** `rewrite_thumbnails` is the one genuine breach of the
+- **M5.** *(Resolved 2026-07-15 — `rewrite_thumbnails` deleted; see
+  `docs/superpowers/specs/2026-07-15-thumbnail-passthrough-refactor.md`.
+  Thumbnails are now decoded to RGBA and passed through
+  `store_bbs_3mf`'s own thumbnail path; rebase-risk #4 below is
+  eliminated with it.)* `rewrite_thumbnails` is the one genuine breach of the
   "all writes through libslic3r" architecture
   (`src/cli/io.cpp:125-216`): rebuilds the whole zip entry-by-entry
   with raw miniz to swap thumbnails. Post-hoc guarded, but the code

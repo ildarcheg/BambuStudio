@@ -39,7 +39,6 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_project_info_ops.cpp
     unit/test_project_profile_ops.cpp
     unit/test_project_aux_ops.cpp
-    unit/test_png_placeholder.cpp
     unit/test_image_signature.cpp
     unit/test_aux_folder_canonical_names.cpp
     unit/test_cover_decoupling.cpp

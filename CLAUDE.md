@@ -142,7 +142,7 @@ the remote), (2) `git push --force-with-lease origin master`
 ## File layout
 - `src/cli/` — entry (`main.cpp`), `io.{hpp,cpp}`,
   `project_ops.{hpp,cpp}`, `project_tab_ops.{hpp,cpp}`,
-  `invariant_guard.{hpp,cpp}`, `png_placeholder.{hpp,cpp}`,
+  `invariant_guard.{hpp,cpp}`,
   `json_output.{hpp,cpp}`, `exception_dispatch.{hpp,cpp}` (M12 — shared
   exception → exit-code dispatch with `ManifestFieldError` short-
   circuit), `apply_helpers.{hpp,cpp}` (M12 — `require_only` +
@@ -178,9 +178,11 @@ the remote), (2) `git push --force-with-lease origin master`
   for the GA-based tree, `build_v208\src\cli\Release` for the parked
   2.08 port, historically `build\src\cli\Release` for the pre-port
   lineage).
-- Thumbnail passthrough for plates whose `plate_index` was compacted
-  after a remove may fall back to synthesis instead of zero-copy
-  (`src/cli/io.cpp:121-124`).
+- ~~Thumbnail passthrough compaction caveat~~ — resolved 2026-07-15:
+  `rewrite_thumbnails` was eliminated entirely; thumbnails now travel as
+  decoded RGBA through `store_bbs_3mf`'s own thumbnail path (see
+  `docs/superpowers/specs/2026-07-15-thumbnail-passthrough-refactor.md`).
+  Content-identical (byte-identical for CLI-produced sources).
 
 ## Detailed references
 - `docs/cli/notes/2026-05-22-bambu-cli-audit.md` — full Round-0 audit

@@ -1,9 +1,9 @@
 #include "io.hpp"
 #include "invariant_guard.hpp"
-#include "png_placeholder.hpp"
 
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/PNGReadWrite.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Semver.hpp"
 #include "libslic3r/miniz_extension.hpp"
@@ -190,132 +190,100 @@ IoResult load_project(const std::string& path, ProjectState& state) {
     return r;
 }
 
-// --- Placeholder thumbnail (128x128 gray RGBA 0xC0; G3) --------------------
-// The bbs_3mf writer accepts ThumbnailData (raw RGBA), not PNG bytes.
-// We populate raw RGBA directly.
+// --- Per-plate thumbnail for the store path (design note 2026-07-15) ----
+// The bbs_3mf loader extracts each source thumbnail's raw PNG bytes into
+// PlateData::plate_thumbnail.pixels (width/height stay 0). Decode those
+// bytes back to RGBA and hand them to store_bbs_3mf as real ThumbnailData,
+// so the exporter writes plate_<N>.png AND derives plate_<N>_small.png
+// through its own canonical path (the same code the GUI uses) -- no
+// post-write archive rewriting. Rows are stored bottom-up because the
+// exporter encodes with the vertical-flip flag (GL framebuffer
+// convention, bbs_3mf.cpp:6720). Plates without a source thumbnail (or
+// with undecodable bytes) get the 128x128 gray placeholder.
 static void fill_placeholder_thumbnail(Slic3r::ThumbnailData& td) {
-    td.width  = 128;
-    td.height = 128;
-    td.pixels.resize(static_cast<size_t>(td.width) * td.height * 4);
+    td.set(128, 128);
     std::memset(td.pixels.data(), 0xC0, td.pixels.size());   // gray RGBA
 }
 
-// --- Thumbnail passthrough (B.2) -------------------------------------------
-// After store_bbs_3mf writes the output archive, replace each plate thumbnail
-// entry:
-//   - If source archive has the matching entry: zero-copy (mz_zip_writer_add_from_zip_reader).
-//   - Otherwise: inject make_placeholder_png_128() as a well-formed PNG.
-//
-// The source entry for plate at position i is looked up by plate_index+1
-// (which equals the plater_id as loaded from the source .3mf). The output
-// entry name is position-based (i+1) to match how store_bbs_3mf names them.
-// For plates whose plate_index was compacted after a remove, the passthrough
-// may fall back to synthesis — acceptable for Phase B scope.
-static bool rewrite_thumbnails(const std::string& archive_path,
-                                const std::string& source_path,
-                                const Slic3r::PlateDataPtrs& plate_data) {
-    // Build map: output entry name -> source candidate entry name
-    std::map<std::string, std::string> passthrough;
-    for (size_t i = 0; i < plate_data.size(); ++i) {
-        const auto* pd = plate_data[i];
-        if (!pd) continue;
-        std::string out_key   = "Metadata/plate_" + std::to_string(i + 1);
-        std::string src_key   = "Metadata/plate_" + std::to_string(pd->plate_index + 1);
-        passthrough[out_key + ".png"]       = src_key + ".png";
-        passthrough[out_key + "_small.png"] = src_key + "_small.png";
-    }
-
-    // Open source archive (optional)
-    mz_zip_archive src_zip;
-    std::memset(&src_zip, 0, sizeof(src_zip));
-    bool has_source = !source_path.empty() && fs::exists(source_path)
-                   && mz_zip_reader_init_file(&src_zip, source_path.c_str(), 0);
-
-    // Build name->index map for source.
-    // The unchecked mz_zip_reader_get_filename is safe here: for a valid
-    // index it never fails, only truncates names >= 512 chars — and a
-    // 511-char truncation can never equal the short "Metadata/plate_N*"
-    // keys this map is probed with, so an over-long foreign entry is
-    // simply unreachable dead weight in the map, never a wrong match.
-    std::map<std::string, mz_uint> src_idx;
-    if (has_source) {
-        mz_uint n = mz_zip_reader_get_num_files(&src_zip);
-        for (mz_uint i = 0; i < n; ++i) {
-            char name[512];
-            mz_zip_reader_get_filename(&src_zip, i, name, sizeof(name));
-            src_idx[name] = i;
+// Decode a PNG byte blob into bottom-up RGBA ThumbnailData. Returns false
+// (td untouched) for undecodable or unsupported formats.
+static bool decode_png_to_thumbnail(const void* data, size_t size,
+                                    Slic3r::ThumbnailData& td) {
+    if (!data || size == 0) return false;
+    Slic3r::png::ImageColorscale img;
+    Slic3r::png::ReadBuf rb{data, size};
+    if (!Slic3r::png::decode_colored_png(rb, img) ||
+        img.cols == 0 || img.rows == 0 ||
+        (img.bytes_per_pixel != 3 && img.bytes_per_pixel != 4) ||
+        img.buf.size() < img.cols * img.rows * img.bytes_per_pixel)
+        return false;
+    td.set(static_cast<unsigned int>(img.cols),
+           static_cast<unsigned int>(img.rows));
+    const size_t ch = static_cast<size_t>(img.bytes_per_pixel);
+    for (size_t row = 0; row < img.rows; ++row) {
+        // bottom-up: destination row counts from the end
+        unsigned char* dst =
+            td.pixels.data() + (img.rows - 1 - row) * img.cols * 4;
+        const unsigned char* src = img.buf.data() + row * img.cols * ch;
+        for (size_t col = 0; col < img.cols; ++col) {
+            dst[col * 4 + 0] = src[col * ch + 0];
+            dst[col * 4 + 1] = src[col * ch + 1];
+            dst[col * 4 + 2] = src[col * ch + 2];
+            dst[col * 4 + 3] = (ch == 4) ? src[col * ch + 3] : 255;
         }
-    }
-
-    // Open the store_bbs_3mf output as reader
-    mz_zip_archive out_zip;
-    std::memset(&out_zip, 0, sizeof(out_zip));
-    if (!mz_zip_reader_init_file(&out_zip, archive_path.c_str(), 0)) {
-        if (has_source) mz_zip_reader_end(&src_zip);
-        return false;
-    }
-
-    // Create rewritten archive
-    const std::string new_path = archive_path + ".pass_tmp";
-    mz_zip_archive new_zip;
-    std::memset(&new_zip, 0, sizeof(new_zip));
-    if (!mz_zip_writer_init_file(&new_zip, new_path.c_str(), 0)) {
-        mz_zip_reader_end(&out_zip);
-        if (has_source) mz_zip_reader_end(&src_zip);
-        return false;
-    }
-
-    // Pre-generate placeholder PNG (used for any synthesized thumbnail)
-    const auto placeholder_png = make_placeholder_png_128();
-
-    bool ok = true;
-    mz_uint n = mz_zip_reader_get_num_files(&out_zip);
-    for (mz_uint i = 0; i < n && ok; ++i) {
-        // Truncation-safety: out_zip was just written by store_bbs_3mf
-        // (miniz, short entry names), and even for a hypothetical long
-        // name the zero-copy branch below copies by INDEX with the
-        // original header — the truncated buffer is only used for the
-        // passthrough lookup, where it can't match the short plate keys.
-        char name[512];
-        mz_zip_reader_get_filename(&out_zip, i, name, sizeof(name));
-        const std::string entry(name);
-
-        auto pt_it = passthrough.find(entry);
-        if (pt_it != passthrough.end()) {
-            // Plate thumbnail: passthrough from source or synthesize
-            auto src_it = src_idx.find(pt_it->second);
-            if (src_it != src_idx.end()) {
-                ok = !!mz_zip_writer_add_from_zip_reader(&new_zip, &src_zip, src_it->second);
-            } else {
-                ok = !!mz_zip_writer_add_mem(&new_zip, entry.c_str(),
-                                             placeholder_png.data(),
-                                             placeholder_png.size(),
-                                             MZ_NO_COMPRESSION);
-            }
-        } else {
-            // Non-thumbnail entry: zero-copy from output archive
-            ok = !!mz_zip_writer_add_from_zip_reader(&new_zip, &out_zip, i);
-        }
-    }
-
-    if (ok) ok = !!mz_zip_writer_finalize_archive(&new_zip);
-    mz_zip_writer_end(&new_zip);
-    mz_zip_reader_end(&out_zip);
-    if (has_source) mz_zip_reader_end(&src_zip);
-
-    if (!ok) {
-        remove_quiet(new_path);
-        return false;
-    }
-
-    boost::system::error_code ec;
-    fs::remove(archive_path, ec);
-    fs::rename(new_path, archive_path, ec);
-    if (ec) {
-        remove_quiet(new_path);
-        return false;
     }
     return true;
+}
+
+// Read one entry from a zip archive into <out>. Returns false when the
+// archive can't be opened or the entry is absent. Read-only.
+static bool read_archive_entry(const std::string& archive_path,
+                               const std::string& entry_name,
+                               std::vector<unsigned char>& out) {
+    boost::system::error_code ex_ec;
+    if (archive_path.empty() || !fs::exists(archive_path, ex_ec)) return false;
+    mz_zip_archive zip;
+    std::memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_file(&zip, archive_path.c_str(), 0)) return false;
+    bool ok = false;
+    int idx = mz_zip_reader_locate_file(&zip, entry_name.c_str(), nullptr, 0);
+    if (idx >= 0) {
+        mz_zip_archive_file_stat st;
+        if (mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(idx), &st)) {
+            out.resize(static_cast<size_t>(st.m_uncomp_size));
+            ok = !!mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(idx),
+                                                out.data(), out.size(), 0);
+        }
+    }
+    mz_zip_reader_end(&zip);
+    return ok;
+}
+
+static void build_plate_thumbnail(const Slic3r::PlateData* pd,
+                                  const std::string& source_path,
+                                  Slic3r::ThumbnailData& td) {
+    if (!pd) { fill_placeholder_thumbnail(td); return; }
+
+    // 1. PNG bytes the loader extracted (sliced projects only — the
+    //    extraction runs while merging slice_info plate entries; an
+    //    unsliced project leaves pixels empty, see the design note).
+    if (!pd->plate_thumbnail.pixels.empty() &&
+        decode_png_to_thumbnail(pd->plate_thumbnail.pixels.data(),
+                                pd->plate_thumbnail.pixels.size(), td))
+        return;
+
+    // 2. Read-only fallback: the plate's thumbnail entry in the source
+    //    archive, keyed by the loader's plate numbering (plate_index + 1).
+    std::vector<unsigned char> png;
+    if (read_archive_entry(source_path,
+                           "Metadata/plate_" +
+                               std::to_string(pd->plate_index + 1) + ".png",
+                           png) &&
+        decode_png_to_thumbnail(png.data(), png.size(), td))
+        return;
+
+    // 3. Newly added plate / undecodable bytes: gray placeholder.
+    fill_placeholder_thumbnail(td);
 }
 
 IoResult save_project(const ProjectState& state, const std::string& out_path) {
@@ -336,20 +304,19 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         }
     }
 
-    // 2. Populate per-plate thumbnails (G3).
-    // ThumbnailData is populated on each PlateData and also passed as
-    // store_params.thumbnail_data per plate. We populate both to satisfy
-    // the writer's relationship-emission logic.
-    std::vector<Slic3r::ThumbnailData> placeholders(state.plate_data.size());
+    // 2. Per-plate thumbnails: decoded from the source PNG bytes the loader
+    //    left in plate_thumbnail.pixels (placeholder when absent). Passed
+    //    only via store_params.thumbnail_data -- PlateData is not touched,
+    //    so the source bytes survive for subsequent saves and save_project
+    //    honors its const contract. (The writer's rels emission targets
+    //    plate_1.png unconditionally, bbs_3mf.cpp:6830, and both entries
+    //    are guaranteed by the in-memory thumbnail path.)
+    std::vector<Slic3r::ThumbnailData> thumbs(state.plate_data.size());
     std::vector<Slic3r::ThumbnailData*> thumb_ptrs;
     thumb_ptrs.reserve(state.plate_data.size());
     for (size_t i = 0; i < state.plate_data.size(); ++i) {
-        fill_placeholder_thumbnail(placeholders[i]);
-        thumb_ptrs.push_back(&placeholders[i]);
-        if (state.plate_data[i]) {
-            // Also stamp the PlateData's own thumbnail so non-store paths agree.
-            state.plate_data[i]->plate_thumbnail = placeholders[i];
-        }
+        build_plate_thumbnail(state.plate_data[i], state.source_path, thumbs[i]);
+        thumb_ptrs.push_back(&thumbs[i]);
     }
 
     // 3. Build StoreParams.
@@ -366,16 +333,6 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         remove_quiet(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = "store_bbs_3mf returned false for: " + tmp_path;
-        return r;
-    }
-
-    // 3b. Thumbnail passthrough: replace store_bbs_3mf's placeholder-encoded
-    // thumbnails with the original PNG blobs from the source archive (if present),
-    // or with synthesized valid PNGs for newly-added plates.
-    if (!rewrite_thumbnails(tmp_path, state.source_path, state.plate_data)) {
-        remove_quiet(tmp_path);
-        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
-        r.error_message = "thumbnail rewrite failed for: " + tmp_path;
         return r;
     }
 
