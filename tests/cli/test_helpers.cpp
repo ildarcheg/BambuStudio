@@ -8,9 +8,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <regex>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 namespace bp = boost::process;
 namespace fs = boost::filesystem;
@@ -21,9 +25,14 @@ CliResult spawn_cli(const std::vector<std::string>& args) {
     CliResult r;
     bp::ipstream out, err;
     bp::child c(BAMBU_CLI_EXE, args, bp::std_out > out, bp::std_err > err);
+    // Drain both pipes concurrently. A sequential drain (stdout to EOF,
+    // then stderr) deadlocks when the child fills the stderr pipe while
+    // stdout is still open: the child blocks in write, this process
+    // blocks in read, and neither can make progress.
     std::stringstream so, se;
+    std::thread err_drain([&] { se << err.rdbuf(); });
     so << out.rdbuf();
-    se << err.rdbuf();
+    err_drain.join();
     c.wait();
     r.exit_code   = c.exit_code();
     r.stdout_text = so.str();
@@ -63,13 +72,45 @@ std::vector<std::string> list_zip_entries(const std::string& zip_path) {
     return out;
 }
 
+namespace {
+std::mutex& temp_registry_mutex() {
+    static std::mutex m;
+    return m;
+}
+std::vector<std::string>& temp_registry() {
+    static std::vector<std::string> paths;
+    return paths;
+}
+} // namespace
+
+void cleanup_recorded_temp_paths() {
+    std::vector<std::string> paths;
+    {
+        std::lock_guard<std::mutex> lock(temp_registry_mutex());
+        paths.swap(temp_registry());
+    }
+    for (const auto& p : paths) {
+        boost::system::error_code ec;
+        fs::remove_all(p, ec);   // best effort; files still open stay put
+    }
+}
+
 std::string fresh_temp_path(const std::string& suffix) {
     static std::atomic<int> counter{0};
     auto t = std::chrono::steady_clock::now().time_since_epoch().count();
     std::ostringstream oss;
     oss << (fs::temp_directory_path().string()) << "/bambu_cli_test_"
         << t << "_" << counter.fetch_add(1) << suffix;
-    return oss.str();
+    std::string path = oss.str();
+    static std::once_flag atexit_once;
+    std::call_once(atexit_once, [] {
+        std::atexit(cleanup_recorded_temp_paths);
+    });
+    {
+        std::lock_guard<std::mutex> lock(temp_registry_mutex());
+        temp_registry().push_back(path);
+    }
+    return path;
 }
 
 std::string canonical_committed_3mf() { return BAMBU_CLI_FIXTURE_3MF; }

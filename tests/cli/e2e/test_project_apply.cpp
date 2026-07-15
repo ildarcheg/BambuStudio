@@ -323,3 +323,29 @@ TEST_CASE("project apply: 12-plate workflow happy path",
 
     fs::remove(in); fs::remove(out); fs::remove_all(mfdir);
 }
+
+TEST_CASE("spawn_cli: huge stderr does not deadlock the pipe drain",
+          "[project_apply][e2e][test_harness]") {
+    // A manifest with an enormous unknown field name makes the CLI echo it
+    // back in the ManifestFieldError message — ~100 KB of stderr while
+    // stdout stays open. A sequential drain (stdout to EOF, then stderr)
+    // deadlocks: the child blocks writing stderr into a full pipe and
+    // never exits, so stdout never reaches EOF.
+    const std::string in = fresh_temp_path("_hugeerr.3mf");
+    fs::copy_file(canonical_committed_3mf(), in, fs::copy_option::overwrite_if_exists);
+    const std::string mfdir = fresh_temp_path("_hugeerr_d");
+    fs::create_directories(mfdir);
+    const std::string big(100000, 'k');
+    const std::string mf = write_manifest(mfdir,
+        "{\"version\":1,\"operations\":[{\"op\":\"plate.add\",\"name\":\"x\",\""
+        + big + "\":1}]}");
+
+    auto r = spawn_cli({"project", "apply", in, "--manifest", mf});
+    INFO("stderr size: " << r.stderr_text.size());
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.size() > 60000);
+    REQUIRE(r.stderr_text.find("unknown field") != std::string::npos);
+
+    fs::remove(in);
+    fs::remove_all(mfdir);
+}

@@ -91,3 +91,56 @@ TEST_CASE("flush_to_disk: succeeds on an existing file, fails on a missing "
     fs::remove(p);
     REQUIRE_FALSE(bambu_cli::flush_to_disk(p));
 }
+
+TEST_CASE("atomic_copy: squatted .bak path fails the copy and preserves the "
+          "destination", "[bambu-cli][roundtrip][save_atomic]") {
+    const std::string ref = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path("_bakswap.3mf");
+    { std::ofstream f(dst, std::ios::binary); f << "ORIGINAL"; }
+
+    // A non-empty directory on the .bak path makes the demote-to-.bak
+    // rename fail. atomic_copy must use the same .bak swap as save_project
+    // (fail the copy, keep the destination) instead of remove-then-rename
+    // (which destroys the original before any failure can be noticed).
+    const std::string bak = dst + ".bak";
+    fs::create_directory(bak);
+    { std::ofstream f(bak + "/occupant.txt"); f << "x"; }
+
+    bambu_cli::IoResult r;
+    REQUIRE_NOTHROW(r = bambu_cli::atomic_copy(ref, dst));
+    REQUIRE_FALSE(r.ok);
+    std::ifstream in(dst, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    REQUIRE(content == "ORIGINAL");
+
+    fs::remove_all(bak);
+    boost::system::error_code ignore;
+    fs::remove(dst, ignore);
+    fs::remove(dst + ".tmp.3mf", ignore);
+}
+
+TEST_CASE("save_project: squatted .bak path fails the save and preserves the "
+          "destination", "[bambu-cli][roundtrip][save_atomic]") {
+    const std::string ref = canonical_committed_3mf();
+    const std::string dst = fresh_temp_path("_bakswap_save.3mf");
+    fs::copy_file(ref, dst, fs::copy_options::overwrite_existing);
+    const auto original_size = fs::file_size(dst);
+
+    const std::string bak = dst + ".bak";
+    fs::create_directory(bak);
+    { std::ofstream f(bak + "/occupant.txt"); f << "x"; }
+
+    bambu_cli::ProjectState state;
+    REQUIRE(bambu_cli::load_project(dst, state).ok);
+    bambu_cli::IoResult r;
+    REQUIRE_NOTHROW(r = bambu_cli::save_project(state, dst));
+    REQUIRE_FALSE(r.ok);
+    REQUIRE(fs::exists(dst));
+    REQUIRE(fs::file_size(dst) == original_size);
+
+    fs::remove_all(bak);
+    boost::system::error_code ignore;
+    fs::remove(dst, ignore);
+    fs::remove(dst + ".tmp.3mf", ignore);
+}

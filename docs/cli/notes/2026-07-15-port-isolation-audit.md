@@ -110,7 +110,14 @@ recommendation R6.
   with raw miniz to swap thumbnails. Post-hoc guarded, but the code
   most likely to silently diverge if upstream renames
   `Metadata/plate_N` entries. `mz_zip_reader_get_filename` returns
-  unchecked at `:151/:181`.
+  unchecked at `:151/:181`. (Sub-point downgraded 2026-07-15 after
+  source-level analysis of miniz: for a valid index the call never
+  fails, only truncates names ≥ 512 chars; a 511-char truncation can
+  never equal the short `Metadata/plate_N*` keys the maps are probed
+  with, and the zero-copy branch copies by *index* with the original
+  header — truncation is provably harmless here. Documented in
+  comments at the call sites instead of adding dead defensive code.
+  The architecture-breach point itself remains open.)
 - **M6.** Hand-rolled numeric parsing maps typos to wrong exit
   classes (`src/cli/apply_helpers.cpp:57-59`,
   `src/cli/commands/object.cpp:20-34`): a string-typed manifest axis

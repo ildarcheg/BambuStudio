@@ -30,6 +30,25 @@ Dispatched dispatch(const std::exception& e,
     if (dynamic_cast<const InvariantViolation*>(&e))    return {to_int(ExitCode::invariant_violation), "invariant_violation", e.what()};
     if (dynamic_cast<const InvalidStateError*>(&e))     return {to_int(ExitCode::invalid_state),       "invalid_state",       e.what()};
 
+    // 2b. Base-class-aware override fallback: an override keyed on a std
+    //     base type must also catch *subclasses* (e.g. Slic3r::RuntimeError
+    //     vs std::runtime_error), which the exact-typeid lookup at step 1
+    //     misses — without outranking the built-in typed table above.
+    //     Probed most-derived-first so an invalid_argument override wins
+    //     over a logic_error one for an invalid_argument subclass.
+    if (!overrides.empty()) {
+        auto lookup = [&](const std::type_info& ti) -> const std::pair<int, std::string>* {
+            auto bit = overrides.find(std::type_index(ti));
+            return bit != overrides.end() ? &bit->second : nullptr;
+        };
+        const std::pair<int, std::string>* m = nullptr;
+        if (!m && dynamic_cast<const std::invalid_argument*>(&e)) m = lookup(typeid(std::invalid_argument));
+        if (!m && dynamic_cast<const std::out_of_range*>(&e))     m = lookup(typeid(std::out_of_range));
+        if (!m && dynamic_cast<const std::logic_error*>(&e))      m = lookup(typeid(std::logic_error));
+        if (!m && dynamic_cast<const std::runtime_error*>(&e))    m = lookup(typeid(std::runtime_error));
+        if (m) return {m->first, m->second, e.what()};
+    }
+
     // std::invalid_argument and std::out_of_range derive from std::logic_error,
     // NOT std::runtime_error, so they don't collide with the catch-all below.
     if (dynamic_cast<const std::invalid_argument*>(&e)) return {to_int(ExitCode::usage_error),         "usage_error",         e.what()};

@@ -25,6 +25,12 @@ std::vector<std::string> list_zip_entries(const std::string& zip_path);
 
 // Path helpers
 std::string fresh_temp_path(const std::string& suffix);   // unique path in $TEMP
+
+// Sweep every path fresh_temp_path has handed out so far (remove_all,
+// errors ignored) and clear the registry. Also registered via atexit on
+// first fresh_temp_path call, so temp artifacts leaked by mid-test
+// assertion failures don't accumulate in %TEMP% across runs.
+void cleanup_recorded_temp_paths();
 std::string canonical_committed_3mf();                    // BAMBU_CLI_FIXTURE_3MF
 std::string canonical_committed_stl_dir();                // BAMBU_CLI_FIXTURE_STL_DIR
 std::string local_reference_3mf_or_skip();                // BAMBU_CLI_LOCAL_REFERENCE_3MF; "" if path absent

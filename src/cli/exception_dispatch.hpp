@@ -17,6 +17,10 @@
 //   1. per-call-site overrides         -> as configured
 //      (exact std::type_index match on dynamic typeid(e))
 //   2. built-in typed-exception table  -> see Dispatched return values
+//   2b. base-class-aware override fallback: overrides keyed on a std base
+//      type also catch subclasses (Slic3r::RuntimeError et al.) that the
+//      exact match at step 1 misses; ranked below the typed table so e.g.
+//      PlacementFailure keeps exit 9 under a runtime_error override
 //
 // The table at step 2 is byte-identical to mutation_runner.hpp's prior
 // inline dynamic_cast ladder (lines 87-123). Behaviour-preserving for

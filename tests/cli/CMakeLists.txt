@@ -49,6 +49,8 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_invariant_cover_references.cpp
     unit/test_index_conventions.cpp
     unit/test_no_gui_includes.cpp
+    unit/test_exception_dispatch.cpp
+    unit/test_temp_hygiene.cpp
     unit/test_apply_helpers.cpp
     unit/test_apply_manifest.cpp
     unit/test_project_apply_handlers.cpp

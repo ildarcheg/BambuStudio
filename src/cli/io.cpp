@@ -63,6 +63,41 @@ ProjectState::~ProjectState() {
     plate_data.clear();
 }
 
+// Shared .bak swap (save_project step 5 and atomic_copy): rename out ->
+// .bak, rename tmp -> out, drop .bak. If the middle rename fails the
+// original is restored from .bak (best effort) and <err> carries the
+// reason. The tmp file is NOT cleaned up here — callers own scratch
+// cleanup. Ported from OrcaSlicer/src/cli/io.cpp:467-499 ("M11 cleanup").
+static bool bak_swap(const std::string& tmp_path, const std::string& out_path,
+                     std::string& err) {
+    const std::string bak = out_path + ".bak";
+    try {
+        if (fs::exists(out_path)) {
+            boost::system::error_code stale_ec;
+            fs::remove(bak, stale_ec);   // best-effort; locked .bak must not abort the save
+            fs::rename(out_path, bak);
+        }
+        try {
+            fs::rename(tmp_path, out_path);
+        } catch (...) {
+            // Best-effort restore: put the original back from .bak.
+            if (fs::exists(bak)) {
+                boost::system::error_code rec;
+                fs::rename(bak, out_path, rec);
+            }
+            throw;
+        }
+        if (fs::exists(bak)) {
+            boost::system::error_code rm_ec;
+            fs::remove(bak, rm_ec);   // best-effort; stale .bak is harmless
+        }
+        return true;
+    } catch (const std::exception& e) {
+        err = std::string("rename failed: ") + e.what();
+        return false;
+    }
+}
+
 bool flush_to_disk(const std::string& path) {
 #ifdef _WIN32
     int fd = -1;
@@ -196,7 +231,12 @@ static bool rewrite_thumbnails(const std::string& archive_path,
     bool has_source = !source_path.empty() && fs::exists(source_path)
                    && mz_zip_reader_init_file(&src_zip, source_path.c_str(), 0);
 
-    // Build name->index map for source
+    // Build name->index map for source.
+    // The unchecked mz_zip_reader_get_filename is safe here: for a valid
+    // index it never fails, only truncates names >= 512 chars — and a
+    // 511-char truncation can never equal the short "Metadata/plate_N*"
+    // keys this map is probed with, so an over-long foreign entry is
+    // simply unreachable dead weight in the map, never a wrong match.
     std::map<std::string, mz_uint> src_idx;
     if (has_source) {
         mz_uint n = mz_zip_reader_get_num_files(&src_zip);
@@ -231,6 +271,11 @@ static bool rewrite_thumbnails(const std::string& archive_path,
     bool ok = true;
     mz_uint n = mz_zip_reader_get_num_files(&out_zip);
     for (mz_uint i = 0; i < n && ok; ++i) {
+        // Truncation-safety: out_zip was just written by store_bbs_3mf
+        // (miniz, short entry names), and even for a hypothetical long
+        // name the zero-copy branch below copies by INDEX with the
+        // original header — the truncated buffer is only used for the
+        // passthrough lookup, where it can't match the short plate keys.
         char name[512];
         mz_zip_reader_get_filename(&out_zip, i, name, sizeof(name));
         const std::string entry(name);
@@ -353,42 +398,16 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         return r;
     }
 
-    // 5. Safer atomic .bak-swap: rename dst -> .bak, rename tmp -> dst,
-    //    remove .bak. If the middle rename fails we restore the original
-    //    from .bak. (There is still a brief window between the two renames
-    //    with no file at the destination; a crash there leaves .bak +
-    //    .tmp.3mf on disk for manual recovery — strictly better than the
-    //    remove-then-rename pattern this replaced, which had the same
-    //    window and no .bak.)
-    //    Ported from OrcaSlicer/src/cli/io.cpp:467-499 (their "M11 cleanup").
-    //    Eliminates the prior window between remove(out_path) and
-    //    rename(tmp -> out_path) where a crash would leave no file at the
-    //    destination.
-    const std::string bak = out_path + ".bak";
-    try {
-        if (fs::exists(out_path)) {
-            boost::system::error_code stale_ec;
-            fs::remove(bak, stale_ec);   // best-effort; locked .bak must not abort the save
-            fs::rename(out_path, bak);
-        }
-        try {
-            fs::rename(tmp_path, out_path);
-        } catch (...) {
-            // Best-effort restore: put the original back from .bak.
-            if (fs::exists(bak)) {
-                boost::system::error_code rec;
-                fs::rename(bak, out_path, rec);
-            }
-            throw;
-        }
-        if (fs::exists(bak)) {
-            boost::system::error_code rm_ec;
-            fs::remove(bak, rm_ec);   // best-effort; stale .bak is harmless
-        }
-    } catch (const std::exception& e) {
+    // 5. Safer atomic .bak-swap (shared bak_swap helper). There is still a
+    //    brief window between the two renames with no file at the
+    //    destination; a crash there leaves .bak + .tmp.3mf on disk for
+    //    manual recovery - strictly better than remove-then-rename, which
+    //    had the same window and no .bak.
+    std::string swap_err;
+    if (!bak_swap(tmp_path, out_path, swap_err)) {
         remove_quiet(tmp_path);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
-        r.error_message = std::string("rename failed: ") + e.what();
+        r.error_message = swap_err;
         return r;
     }
 
@@ -417,12 +436,19 @@ IoResult atomic_copy(const std::string& src, const std::string& dst) {
         fs::copy_file(src, tmp, fs::copy_options::overwrite_existing);
         if (!flush_to_disk(tmp))
             throw std::runtime_error("flush to disk failed for: " + tmp);
-        if (fs::exists(dst)) fs::remove(dst);
-        fs::rename(tmp, dst);
     } catch (const std::exception& e) {
         remove_quiet(tmp);
         r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
         r.error_message = std::string("atomic_copy failed: ") + e.what();
+        return r;
+    }
+    // Same .bak swap as save_project: never destroy the destination before
+    // the replacement is in place.
+    std::string swap_err;
+    if (!bak_swap(tmp, dst, swap_err)) {
+        remove_quiet(tmp);
+        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
+        r.error_message = "atomic_copy failed: " + swap_err;
         return r;
     }
     r.ok = true;
