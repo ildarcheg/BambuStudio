@@ -327,10 +327,13 @@ OpResult add_object_to_plate(ProjectState& state,
 
         // Update plate bookkeeping. Each copy gets a unique loaded_id
         // (= identify_id in 3MF) so obj_inst_map → objects_and_instances
-        // reconstruction works correctly after save/reload.
+        // reconstruction works correctly after save/reload. obj_inst_map
+        // uses the CLI-canonical shape: key == loaded_id (see
+        // rebuild_objects_and_instances in io.cpp).
         size_t new_loaded_id = base_loaded_id + static_cast<size_t>(k);
         inst_k->loaded_id = new_loaded_id;
-        pd->obj_inst_map[obj_idx_k] = {0, static_cast<int>(new_loaded_id)};
+        pd->obj_inst_map[static_cast<int>(new_loaded_id)] =
+            {0, static_cast<int>(new_loaded_id)};
         pd->objects_and_instances.push_back({obj_idx_k, 0});
 
         // Off-bed check (manual mode only; scale-only AABB, rotation excluded).
@@ -422,14 +425,12 @@ OpResult add_object_to_plate(ProjectState& state,
 std::vector<ListedObject> list_objects(const ProjectState& state, const std::string& only_plate) {
     std::vector<ListedObject> out;
 
-    // After bbs_3mf loading, obj_inst_map[key] = (inst_idx_in_object, identify_id/loaded_id).
-    // The bbs_3mf reader stamps inst->loaded_id = identify_id during load (bbs_3mf.cpp:2402).
-    // For freshly-added objects (same process), we set inst->loaded_id explicitly in
-    // add_object_to_plate and key obj_inst_map by that same loaded_id.
-    //
-    // Either way: for each obj_inst_map entry on a plate,
-    //   kv.second.second == inst->loaded_id  (after load or after add).
-    // So we build a loaded_id -> plate map and then enumerate model objects/instances.
+    // obj_inst_map is in the CLI-canonical shape (normalized at load in
+    // rebuild_objects_and_instances, maintained by add_object_to_plate):
+    // key == loaded_id, value = (instance_id, loaded_id). The bbs_3mf
+    // reader stamps inst->loaded_id = identify_id during load
+    // (bbs_3mf.cpp:2402); add_object_to_plate assigns fresh unique ones.
+    // Build a loaded_id -> plate map, then enumerate model instances.
 
     // Step 1: build loaded_id -> plate mapping for relevant plates.
     std::map<size_t, const Slic3r::PlateData*> id_to_plate;
@@ -483,12 +484,9 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
     std::vector<bool> is_removed(state.model.objects.size(), false);
     for (int idx : to_remove) is_removed[static_cast<size_t>(idx)] = true;
 
-    // Collect the loaded_id values of all instances belonging to the removed objects.
-    // This is the correct cross-format key for obj_inst_map cleanup:
-    //   - After load_project: obj_inst_map key=3mf_object_id, value={instance_id, loaded_id}
-    //   - After add_object_to_plate: obj_inst_map key=obj_idx, value={0, loaded_id}
-    // In both cases, value.second == loaded_id == ModelInstance::loaded_id.
-    // Removing by loaded_id set handles both formats correctly.
+    // Collect the loaded_id values of all instances belonging to the removed
+    // objects. obj_inst_map is keyed by loaded_id (CLI-canonical shape), so
+    // this set drives the cleanup below.
     std::set<size_t> removed_loaded_ids;
     for (int idx : to_remove) {
         const auto* obj = state.model.objects[idx];
@@ -509,9 +507,7 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
                 int fi = p.first;
                 return fi >= 0 && fi < static_cast<int>(is_removed.size()) && is_removed[static_cast<size_t>(fi)];
             }), oi.end());
-        // obj_inst_map: remove entries whose value.second (loaded_id) is in the removed set.
-        // Works correctly for both post-load (key=3mf_obj_id, value={inst_id, loaded_id})
-        // and post-add (key=obj_idx, value={0, loaded_id}) formats.
+        // obj_inst_map: remove entries whose loaded_id is in the removed set.
         for (auto it = pd->obj_inst_map.begin(); it != pd->obj_inst_map.end(); ) {
             size_t lid = static_cast<size_t>(it->second.second);
             if (removed_loaded_ids.count(lid) > 0)
@@ -542,8 +538,10 @@ OpResult remove_object(ProjectState& state, const std::string& object_name) {
         };
         for (auto& p : pd->objects_and_instances)
             p.first = adjust(p.first);
-        for (auto& kv : pd->obj_inst_map)
-            kv.second.first = adjust(kv.second.first);
+        // obj_inst_map is deliberately NOT renumbered: its values are
+        // (instance_id, loaded_id) — neither field is a model object
+        // index. The old renumber here corrupted instance_ids by treating
+        // value.first as an object index (2026-07-15 audit finding).
     }
 
     r.ok = true;

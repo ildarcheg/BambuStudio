@@ -57,3 +57,41 @@ TEST_CASE("invariant guard: missing LAST plate thumbnail is detected on a "
 
     fs::remove(out);
 }
+
+TEST_CASE("obj_inst_map: canonical single-domain shape — key == loaded_id "
+          "for loaded and CLI-added entries alike", "[unit][obj_inst_map]") {
+    // The loader emplaces {3mf object_id -> (instance_id, identify_id)};
+    // add_object_to_plate used to key by in-memory obj_idx. Two different
+    // key domains in one map = collision-prone (both are small ints), and
+    // no consumer reads the keys anyway — every reader uses value.second
+    // (the loaded_id). Canonical CLI form: key == value.second, so the map
+    // is a per-plate {loaded_id -> (instance_id, loaded_id)} with globally
+    // unique keys by construction.
+    ProjectState s;
+    auto lr = bambu_cli::load_project(BAMBU_CLI_FIXTURE_TEST_REFERENCE_3MF, s);
+    REQUIRE(lr.ok);
+    REQUIRE_FALSE(s.model.objects.empty());   // fixture carries one object
+
+    bambu_cli::ObjectRef ref;
+    bambu_cli::ManualTransform tf;
+    tf.has_translate = true; tf.tx = 60; tf.ty = 60; tf.tz = 0;
+    REQUIRE(bambu_cli::add_object_to_plate(
+        s, s.plate_data.front()->plate_name,
+        bambu_cli_unit::fixture_stl("cube.stl"),
+        "MapShapeCube", -1, &tf, 2, &ref).ok);
+
+    size_t entries = 0;
+    for (const auto* pd : s.plate_data) {
+        if (!pd) continue;
+        for (const auto& kv : pd->obj_inst_map) {
+            INFO("plate '" << pd->plate_name << "' key=" << kv.first
+                 << " value=(" << kv.second.first << "," << kv.second.second
+                 << ")");
+            REQUIRE(kv.first == kv.second.second);
+            REQUIRE(kv.second.second > 0);
+            ++entries;
+        }
+    }
+    // 1 loaded + 2 added instances must all be represented.
+    REQUIRE(entries >= 3);
+}

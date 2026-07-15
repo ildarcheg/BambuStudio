@@ -158,6 +158,21 @@ static void rebuild_objects_and_instances(Slic3r::PlateDataPtrs& plates,
                 plate->objects_and_instances.push_back(it->second);
             }
         }
+
+        // Normalize to the CLI-canonical single-domain shape:
+        // key == loaded_id (globally unique), value = (instance_id,
+        // loaded_id). The loader keys by 3mf object_id while
+        // add_object_to_plate keys by loaded_id — two small-int domains in
+        // one map invite collisions, and no consumer reads the loader's
+        // keys (every reader uses value.second). Entries with loaded_id 0
+        // are unusable and dropped. The store path never reads this map
+        // (it consumes objects_and_instances, bbs_3mf.cpp:8202).
+        std::map<int, std::pair<int, int>> normalized;
+        for (const auto& kv : plate->obj_inst_map) {
+            if (kv.second.second > 0)
+                normalized[kv.second.second] = kv.second;
+        }
+        plate->obj_inst_map = std::move(normalized);
     }
 }
 
