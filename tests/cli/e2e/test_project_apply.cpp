@@ -232,8 +232,8 @@ TEST_CASE("project apply: plate.auto-orient unknown field -> exit 1",
 
 // Semantic trigger — split-to-parts on a single-component cube.
 // Adds cube.stl via object.add in a first apply invocation, then attempts
-// split-to-parts in a second; single-component throws std::invalid_argument
-// which the override map remaps to exit 7 (invalid_state).
+// split-to-parts in a second; single-component throws the typed
+// InvalidStateError -> exit 7 (invalid_state) via the built-in ladder.
 TEST_CASE("project apply: split-to-parts on single-component mesh -> exit 7",
           "[project_apply][e2e][exit7]") {
     const std::string in    = fresh_temp_path("_apply_split_sem.3mf");
@@ -264,9 +264,9 @@ TEST_CASE("project apply: split-to-parts on single-component mesh -> exit 7",
         REQUIRE(setup_r.exit_code == 0);
     }
 
-    // Step 2: attempt to split — single-component cube throws
-    // std::invalid_argument inside split_object_to_parts; the override entry
-    // for object.split-to-parts remaps that to exit 7 / invalid_state.
+    // Step 2: attempt to split — single-component cube throws the typed
+    // InvalidStateError inside split_object_to_parts -> exit 7 /
+    // invalid_state via the built-in dispatch ladder.
     {
         std::string mf = write_manifest(mfdir,
             R"({"version":1,"operations":[{"op":"object.split-to-parts","name":"split_target"}]})");

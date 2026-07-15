@@ -32,9 +32,12 @@ single load/save cycle via a `HandlerRegistry` of
 `HandlerEntry{ fn, overrides }` (one entry per op). Schema-shape
 errors throw `ManifestFieldError` (a `std::invalid_argument`
 subclass) which `exception_dispatch::dispatch` short-circuits to
-exit 1 *before* the per-op override lookup, so manifest typos can't
-be misclassified as `invalid_state` on verbs (split-to-parts,
-merge-parts) whose overrides remap `invalid_argument` to exit 7.
+exit 1 *before* the per-op override lookup. (Since 2026-07-15,
+split-to-parts / merge-parts mesh-state errors throw a typed
+`InvalidStateError` → exit 7 via the built-in ladder and those verbs'
+`invalid_argument → 7` override maps are gone; merge's bad
+`--filament` is exit 1 like every other verb. auto-orient's
+`runtime_error → 7` override is the only one left.)
 
 ## Sibling-fork divergences — LEGITIMATE, do not try to "fix"
 - **Profile storage:** Bambu reads `model.profile_info` directly via

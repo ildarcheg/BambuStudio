@@ -83,12 +83,18 @@ TEST_CASE("object merge-parts: step d -- --into collision -> exit 5", "[e2e][mer
     fs::remove(tmp);
 }
 
-TEST_CASE("object merge-parts: step e -- filament out of range -> exit 6", "[e2e][merge]") {
+TEST_CASE("object merge-parts: step e -- filament out of range -> exit 1 "
+          "usage_error", "[e2e][merge]") {
+    // A bad --filament value is a usage error, consistent with object add
+    // and set-filament (exit 1) — not unknown_reference (contract change
+    // 2026-07-15, see the port-isolation audit note).
     std::string tmp = build_split_project();
     auto r = spawn_cli({"object", "merge-parts", tmp,
                         "--name", "twin", "--parts", "twin_1,twin_2",
                         "--into", "m", "--filament", "99"});
-    REQUIRE(r.exit_code == 6);
+    INFO("stderr: " << r.stderr_text);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_text.find("usage_error") != std::string::npos);
     fs::remove(tmp);
 }
 

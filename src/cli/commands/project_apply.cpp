@@ -227,9 +227,8 @@ HandlerRegistry::HandlerRegistry()
             throw ManifestFieldError("object.split-to-parts: missing or non-string 'name'");
         split_object_to_parts(s, step["name"].get<std::string>());
     };
-    m_handlers["object.split-to-parts"].overrides = {
-        { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
-    };
+    // No overrides: mesh-state errors are typed InvalidStateError (exit 7
+    // via the built-in dispatch ladder).
 
     m_handlers["object.merge-parts"].fn = [](ProjectState& s, const json& step) {
         require_only(step, {"op", "name", "parts", "into", "filament"});
@@ -251,9 +250,9 @@ HandlerRegistry::HandlerRegistry()
 
         merge_object_parts(s, step["name"].get<std::string>(), p);
     };
-    m_handlers["object.merge-parts"].overrides = {
-        { std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"} },
-    };
+    // No overrides: mesh-state errors are typed InvalidStateError (exit 7
+    // via the built-in dispatch ladder); bad filament values are usage
+    // errors (invalid_argument -> exit 1).
 
     // ---- config.set ----
     m_handlers["config.set"].fn = [](ProjectState& s, const json& step) {

@@ -10,8 +10,10 @@
 //
 // Dispatch order (matters!):
 //   0. ManifestFieldError              -> exit 1 / "usage_error"
-//      (BEFORE overrides — protects schema typos on verbs whose override
-//      map remaps std::invalid_argument to exit 7)
+//      (BEFORE overrides — protects schema typos from any per-verb
+//      override remapping; historically split/merge remapped
+//      std::invalid_argument to exit 7, since replaced by the typed
+//      InvalidStateError. auto-orient still overrides runtime_error.)
 //   1. per-call-site overrides         -> as configured
 //      (exact std::type_index match on dynamic typeid(e))
 //   2. built-in typed-exception table  -> see Dispatched return values

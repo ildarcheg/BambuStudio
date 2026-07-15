@@ -70,15 +70,15 @@ TEST_CASE("merge_object_parts: step d before step e (fail-fast)", "[unit][merge]
     REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::DuplicateNameError);
 }
 
-TEST_CASE("merge_object_parts: step e -- filament out of range -> out_of_range", "[unit][merge]") {
+TEST_CASE("merge_object_parts: step e -- filament out of range -> invalid_argument (usage)", "[unit][merge]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     add_and_split(s);
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "m"; p.filament = 99;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::out_of_range);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
 }
 
-TEST_CASE("merge_object_parts: step h -- filament disagreement -> invalid_argument", "[unit][merge]") {
+TEST_CASE("merge_object_parts: step h -- filament disagreement -> InvalidStateError", "[unit][merge]") {
     // Set different extruders on the two volumes, then merge without --filament
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
@@ -89,10 +89,10 @@ TEST_CASE("merge_object_parts: step h -- filament disagreement -> invalid_argume
     obj->volumes[1]->config.set("extruder", 2);
 
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "m"; p.filament = -1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }
 
-TEST_CASE("merge_object_parts: step i -- non-extruder config key -> invalid_argument", "[unit][merge]") {
+TEST_CASE("merge_object_parts: step i -- non-extruder config key -> InvalidStateError", "[unit][merge]") {
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     add_and_split(s);
@@ -103,7 +103,7 @@ TEST_CASE("merge_object_parts: step i -- non-extruder config key -> invalid_argu
     obj->volumes[0]->config.set_deserialize("seam_position", "nearest", ctx);
 
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "m"; p.filament = 1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }
 
 TEST_CASE("merge_object_parts: deterministic placement -- same result regardless of --parts order",
@@ -184,29 +184,30 @@ TEST_CASE("merge_object_parts: step c before step d (fail-fast)", "[unit][merge]
 }
 
 TEST_CASE("merge_object_parts: step e before step f (fail-fast)", "[unit][merge]") {
-    // filament=99 out of range (step e: out_of_range); twin_1 is NEGATIVE_VOLUME
-    // so step f would throw invalid_argument if reached — step e throws first.
+    // filament=99 out of range (step e: invalid_argument, usage error);
+    // twin_1 is NEGATIVE_VOLUME so step f would throw InvalidStateError if
+    // reached — step e throws first.
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     add_and_split(s);
     s.model.objects[0]->volumes[0]->set_type(Slic3r::ModelVolumeType::NEGATIVE_VOLUME);
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "merged"; p.filament = 99;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::out_of_range);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
 }
 
 TEST_CASE("merge_object_parts: step f before step g (fail-fast)", "[unit][merge]") {
-    // twin_1 is NEGATIVE_VOLUME with non-empty mesh (step f: invalid_argument);
+    // twin_1 is NEGATIVE_VOLUME with non-empty mesh (step f: InvalidStateError);
     // mesh is non-empty so step g would NOT throw — step f throws first.
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     add_and_split(s);
     s.model.objects[0]->volumes[0]->set_type(Slic3r::ModelVolumeType::NEGATIVE_VOLUME);
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "merged"; p.filament = 1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }
 
 TEST_CASE("merge_object_parts: step g before step h (fail-fast)", "[unit][merge]") {
-    // twin_1 has empty mesh (step g: invalid_argument); twin_1 and twin_2 have
+    // twin_1 has empty mesh (step g: InvalidStateError); twin_1 and twin_2 have
     // the same default extruder so step h (filament agreement) would NOT throw —
     // step g throws first.
     ProjectState s;
@@ -214,12 +215,13 @@ TEST_CASE("merge_object_parts: step g before step h (fail-fast)", "[unit][merge]
     add_and_split(s);
     s.model.objects[0]->volumes[0]->reset_mesh();
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "merged"; p.filament = -1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }
 
 TEST_CASE("merge_object_parts: step h before step i (fail-fast)", "[unit][merge]") {
-    // different extruders on twin_1/twin_2 with filament=-1 (step h: invalid_argument);
-    // no non-extruder config keys so step i would NOT throw — step h throws first.
+    // different extruders on twin_1/twin_2 with filament=-1 (step h:
+    // InvalidStateError); no non-extruder config keys so step i would NOT
+    // throw — step h throws first.
     ProjectState s;
     bambu_cli_unit::load_reference_into(s);
     add_and_split(s);
@@ -228,7 +230,7 @@ TEST_CASE("merge_object_parts: step h before step i (fail-fast)", "[unit][merge]
     obj->volumes[0]->config.set("extruder", 1);
     obj->volumes[1]->config.set("extruder", 2);
     MergePartsParams p; p.parts = {"twin_1", "twin_2"}; p.into = "merged"; p.filament = -1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }
 
 // ============================================================
@@ -242,7 +244,7 @@ TEST_CASE("merge_object_parts: non-MODEL_PART source throws", "[unit][merge]") {
     // Change twin_1 to NEGATIVE_VOLUME — not a MODEL_PART
     s.model.objects[0]->volumes[0]->set_type(Slic3r::ModelVolumeType::NEGATIVE_VOLUME);
     MergePartsParams p; p.parts = {"twin_1"}; p.into = "merged"; p.filament = 1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }
 
 TEST_CASE("merge_object_parts: empty-mesh source throws", "[unit][merge]") {
@@ -252,5 +254,5 @@ TEST_CASE("merge_object_parts: empty-mesh source throws", "[unit][merge]") {
     // Reset twin_1's mesh to empty (zero facets)
     s.model.objects[0]->volumes[0]->reset_mesh();
     MergePartsParams p; p.parts = {"twin_1"}; p.into = "merged"; p.filament = 1;
-    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), std::invalid_argument);
+    REQUIRE_THROWS_AS(bambu_cli::merge_object_parts(s, "twin", p), bambu_cli::InvalidStateError);
 }

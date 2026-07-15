@@ -931,7 +931,7 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name)
 
     // Validation: exactly one volume.
     if (obj->volumes.size() != 1)
-        throw std::invalid_argument(
+        throw InvalidStateError(
             "split-to-parts requires exactly 1 volume, got " +
             std::to_string(obj->volumes.size()));
 
@@ -939,7 +939,7 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name)
 
     // Validation: must be a solid model part, not a modifier/support/etc.
     if (vol->type() != Slic3r::ModelVolumeType::MODEL_PART)
-        throw std::invalid_argument(
+        throw InvalidStateError(
             "split-to-parts: volume type must be MODEL_PART");
 
     // Align volume name with object name before split so resulting volumes
@@ -957,7 +957,7 @@ size_t split_object_to_parts(ProjectState& state, const std::string& name)
     size_t parts = vol->split(filament_count);
 
     if (parts <= 1)
-        throw std::invalid_argument(
+        throw InvalidStateError(
             "split-to-parts: mesh has only 1 connected component");
 
     // Re-stamp source.input_file on every resulting volume that lost it
@@ -1013,7 +1013,7 @@ std::string merge_object_parts(ProjectState& state,
     const size_t slot_count = get_filament_count(state.project_config);
     if (p.filament != -1) {
         if (p.filament < 1 || static_cast<size_t>(p.filament) > slot_count)
-            throw std::out_of_range(
+            throw std::invalid_argument(
                 "merge-parts: filament " + std::to_string(p.filament) +
                 " out of range [1, " + std::to_string(slot_count) + "]");
     }
@@ -1021,14 +1021,14 @@ std::string merge_object_parts(ProjectState& state,
     // Step f: Each source must be MODEL_PART.
     for (size_t idx : src_indices) {
         if (obj->volumes[idx]->type() != Slic3r::ModelVolumeType::MODEL_PART)
-            throw std::invalid_argument(
+            throw InvalidStateError(
                 "merge-parts: part '" + obj->volumes[idx]->name + "' is not MODEL_PART");
     }
 
     // Step g: Each source mesh must be non-empty.
     for (size_t idx : src_indices) {
         if (obj->volumes[idx]->mesh().empty())
-            throw std::invalid_argument(
+            throw InvalidStateError(
                 "merge-parts: part '" + obj->volumes[idx]->name + "' has empty mesh");
     }
 
@@ -1040,7 +1040,7 @@ std::string merge_object_parts(ProjectState& state,
             int e = obj->volumes[idx]->extruder_id();
             if (first_ext == -1) { first_ext = e; }
             else if (e != first_ext)
-                throw std::invalid_argument(
+                throw InvalidStateError(
                     "merge-parts: parts have different filament assignments; use --filament to resolve");
         }
         agreed_extruder = first_ext;
@@ -1050,7 +1050,7 @@ std::string merge_object_parts(ProjectState& state,
     for (size_t idx : src_indices) {
         for (const std::string& key : obj->volumes[idx]->config.keys()) {
             if (key != "extruder")
-                throw std::invalid_argument(
+                throw InvalidStateError(
                     "merge-parts: part '" + obj->volumes[idx]->name +
                     "' has per-volume config key '" + key + "' (only extruder allowed)");
         }

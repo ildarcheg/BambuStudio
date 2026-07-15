@@ -3,6 +3,7 @@
 #include "io.hpp"
 #include "unit_helpers.hpp"
 
+#include "exception_dispatch.hpp"
 #include "exceptions.hpp"
 #include "project_ops.hpp"
 #include "project_state.hpp"
@@ -503,13 +504,17 @@ TEST_CASE("object.split-to-parts: unknown field throws",
     REQUIRE_THROWS_AS(reg.lookup("object.split-to-parts").fn(s, step), ManifestFieldError);
 }
 
-TEST_CASE("object.split-to-parts: entry carries invalid_argument -> exit 7 override",
+TEST_CASE("object.split-to-parts: no override map — mesh-state errors are "
+          "typed InvalidStateError (exit 7 via the built-in ladder)",
           "[project_apply][object.split-to-parts][overrides]") {
     HandlerRegistry reg;
     const auto& entry = reg.lookup("object.split-to-parts");
-    auto it = entry.overrides.find(std::type_index(typeid(std::invalid_argument)));
-    REQUIRE(it != entry.overrides.end());
-    REQUIRE(it->second.first == 7);
+    REQUIRE(entry.overrides.empty());
+    // The exit-7 semantics now come from the exception type itself.
+    auto d = bambu_cli::exception_dispatch::dispatch(
+        bambu_cli::InvalidStateError("x"), entry.overrides);
+    REQUIRE(d.exit_code == 7);
+    REQUIRE(d.code == "invalid_state");
 }
 
 // ---------- object.merge-parts tests ----------
@@ -549,13 +554,21 @@ TEST_CASE("object.merge-parts: unknown field throws",
     REQUIRE_THROWS_AS(reg.lookup("object.merge-parts").fn(s, step), ManifestFieldError);
 }
 
-TEST_CASE("object.merge-parts: entry carries invalid_argument -> exit 7 override",
+TEST_CASE("object.merge-parts: no override map — mesh-state errors are "
+          "typed InvalidStateError (exit 7), bad filament values are "
+          "usage errors (exit 1)",
           "[project_apply][object.merge-parts][overrides]") {
     HandlerRegistry reg;
     const auto& entry = reg.lookup("object.merge-parts");
-    auto it = entry.overrides.find(std::type_index(typeid(std::invalid_argument)));
-    REQUIRE(it != entry.overrides.end());
-    REQUIRE(it->second.first == 7);
+    REQUIRE(entry.overrides.empty());
+    auto d7 = bambu_cli::exception_dispatch::dispatch(
+        bambu_cli::InvalidStateError("x"), entry.overrides);
+    REQUIRE(d7.exit_code == 7);
+    REQUIRE(d7.code == "invalid_state");
+    auto d1 = bambu_cli::exception_dispatch::dispatch(
+        std::invalid_argument("x"), entry.overrides);
+    REQUIRE(d1.exit_code == 1);
+    REQUIRE(d1.code == "usage_error");
 }
 
 // ---------- config.set tests ----------

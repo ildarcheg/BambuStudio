@@ -212,16 +212,13 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
         OutputMode mode = (mode_out && *mode_out == OutputMode::Json)
                           ? OutputMode::Json : OutputMode::Text;
         const std::string& out = spa->out.empty() ? spa->in : spa->out;
-        // std::invalid_argument is remapped to exit 7 (invalid_state) for
-        // this verb — invalid mesh state, not a usage error.
-        MutationExceptionMap overrides = {
-            {std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"}}
-        };
+        // Mesh-state errors throw typed InvalidStateError (exit 7 via the
+        // built-in dispatch ladder); no override map needed.
         run_mutation(mode, spa->in, out, [&](ProjectState& state) {
             size_t parts = split_object_to_parts(state, spa->name);
             return "split-to-parts: " + spa->name + " -> " +
                    std::to_string(parts) + " parts.";
-        }, overrides);
+        });
     });
 
     // --- object merge-parts -----------------------------------------------
@@ -257,17 +254,16 @@ void register_object_subcommands(CLI::App& app, OutputMode* mode_out) {
             std::exit(to_int(ExitCode::usage_error));
         }
 
-        // Override: std::invalid_argument -> exit 7 (invalid_state) for mesh-state checks.
-        MutationExceptionMap overrides = {
-            {std::type_index(typeid(std::invalid_argument)), {7, "invalid_state"}}
-        };
+        // Mesh-state errors throw typed InvalidStateError (exit 7 via the
+        // built-in dispatch ladder); usage errors (bad --filament) throw
+        // invalid_argument (exit 1). No override map needed.
         run_mutation(mode, mpa->in, out, [&](ProjectState& state) {
             MergePartsParams p;
             p.parts    = parts;
             p.into     = mpa->into;
             p.filament = mpa->filament;
             return merge_object_parts(state, mpa->name, p);
-        }, overrides);
+        });
     });
 
     // --- object auto-orient -----------------------------------------------
