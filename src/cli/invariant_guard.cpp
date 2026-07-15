@@ -96,7 +96,11 @@ static bool check_thumbnails(const std::vector<std::string>& entries,
     for (size_t i = 0; i < state.plate_data.size(); ++i) {
         const Slic3r::PlateData* pd = state.plate_data[i];
         if (!pd) continue;
-        int idx = pd->plate_index > 0 ? pd->plate_index : static_cast<int>(i + 1);
+        // The writer names thumbnail entries by *position*, 1-based: the
+        // plate at vector position i gets plate_<i+1>.png regardless of
+        // pd->plate_index (bbs_3mf.cpp:6309). Look up by position, or a
+        // missing last-plate thumbnail goes undetected.
+        int idx = static_cast<int>(i + 1);
         std::string big   = "Metadata/plate_" + std::to_string(idx) + ".png";
         std::string small = "Metadata/plate_" + std::to_string(idx) + "_small.png";
         if (entry_set.find(big) == entry_set.end()) {

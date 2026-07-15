@@ -41,10 +41,11 @@ OpResult add_plate(ProjectState& state, const std::string& name) {
             throw DuplicateNameError("plate '" + name + "' already exists");
     }
     auto* plate = new Slic3r::PlateData();
-    // plate_index is 1-based, monotonically increasing.
-    int max_idx = 0;
-    for (const auto* p : state.plate_data) if (p && p->plate_index > max_idx) max_idx = p->plate_index;
-    plate->plate_index = max_idx + 1;
+    // plate_index is 0-based and equals the plate's vector position: the
+    // bbs_3mf loader stores plater_id - 1 (bbs_3mf.cpp:1642) and
+    // remove_plate re-compacts indices to positions. Appending therefore
+    // takes index == current size.
+    plate->plate_index = static_cast<int>(state.plate_data.size());
     plate->plate_name  = name;
     // objects_and_instances + obj_inst_map start empty (new plate is empty).
     // config inherits defaults at save time.
