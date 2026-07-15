@@ -82,3 +82,12 @@ TEST_CASE("atomic_copy: stale tmp path occupied by a non-empty directory -> "
     boost::system::error_code ignore;
     fs::remove(dst, ignore);
 }
+
+TEST_CASE("flush_to_disk: succeeds on an existing file, fails on a missing "
+          "path", "[bambu-cli][roundtrip][save_atomic]") {
+    const std::string p = fresh_temp_path("_flush.bin");
+    { std::ofstream f(p, std::ios::binary); f << "data"; }
+    REQUIRE(bambu_cli::flush_to_disk(p));
+    fs::remove(p);
+    REQUIRE_FALSE(bambu_cli::flush_to_disk(p));
+}

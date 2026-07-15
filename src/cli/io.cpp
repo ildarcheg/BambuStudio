@@ -19,6 +19,16 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#include <share.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace fs = boost::filesystem;
 
 namespace bambu_cli {
@@ -51,6 +61,24 @@ static bool clear_stale_scratch(const std::string& path,
 ProjectState::~ProjectState() {
     for (auto* p : plate_data) delete p;
     plate_data.clear();
+}
+
+bool flush_to_disk(const std::string& path) {
+#ifdef _WIN32
+    int fd = -1;
+    if (_sopen_s(&fd, path.c_str(), _O_RDWR | _O_BINARY, _SH_DENYNO,
+                 _S_IREAD | _S_IWRITE) != 0 || fd < 0)
+        return false;
+    const bool ok = (_commit(fd) == 0);
+    _close(fd);
+    return ok;
+#else
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    const bool ok = (::fsync(fd) == 0);
+    ::close(fd);
+    return ok;
+#endif
 }
 
 // --- LoadStrategy combinator (enum class — operators are defined in bbs_3mf.hpp)
@@ -315,9 +343,23 @@ IoResult save_project(const ProjectState& state, const std::string& out_path) {
         return r;
     }
 
+    // 4b. Flush the fully-validated temp file to stable storage BEFORE the
+    //     swap: once the original is demoted to .bak, the new bytes must
+    //     already be on disk or a power loss loses both.
+    if (!flush_to_disk(tmp_path)) {
+        remove_quiet(tmp_path);
+        r.exit_code = to_int(ExitCode::invalid_state); r.error_code = "invalid_state";
+        r.error_message = "flush to disk failed for: " + tmp_path;
+        return r;
+    }
+
     // 5. Safer atomic .bak-swap: rename dst -> .bak, rename tmp -> dst,
-    //    remove .bak. The destination is never absent during the swap; if
-    //    the middle rename fails we restore the original from .bak.
+    //    remove .bak. If the middle rename fails we restore the original
+    //    from .bak. (There is still a brief window between the two renames
+    //    with no file at the destination; a crash there leaves .bak +
+    //    .tmp.3mf on disk for manual recovery — strictly better than the
+    //    remove-then-rename pattern this replaced, which had the same
+    //    window and no .bak.)
     //    Ported from OrcaSlicer/src/cli/io.cpp:467-499 (their "M11 cleanup").
     //    Eliminates the prior window between remove(out_path) and
     //    rename(tmp -> out_path) where a crash would leave no file at the
@@ -373,6 +415,8 @@ IoResult atomic_copy(const std::string& src, const std::string& dst) {
     }
     try {
         fs::copy_file(src, tmp, fs::copy_options::overwrite_existing);
+        if (!flush_to_disk(tmp))
+            throw std::runtime_error("flush to disk failed for: " + tmp);
         if (fs::exists(dst)) fs::remove(dst);
         fs::rename(tmp, dst);
     } catch (const std::exception& e) {

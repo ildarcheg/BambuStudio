@@ -27,8 +27,15 @@ IoResult load_project(const std::string& path, ProjectState& state);
 // On rename failure: returns exit_code 7 (invalid_state).
 IoResult save_project(const ProjectState& state, const std::string& out_path);
 
-// Atomic copy of <src> to <dst>. dst.tmp.3mf created, fsync'd, renamed.
-// Used by `project init` for the initial clone.
+// Atomic copy of <src> to <dst>. dst.tmp.3mf created, flushed to disk,
+// renamed. Used by `project init` for the initial clone.
 IoResult atomic_copy(const std::string& src, const std::string& dst);
+
+// Flush <path>'s data to stable storage (_commit on Windows, fsync
+// elsewhere). Called on the temp file before the rename swap so a power
+// loss right after a "successful" save cannot leave the destination
+// pointing at data that never hit the disk. Returns false if the file
+// cannot be opened or the flush fails.
+bool flush_to_disk(const std::string& path);
 
 } // namespace bambu_cli
