@@ -147,12 +147,16 @@ static bool check_config_roundtrip(const std::string& saved_path,
         if (!is_vector_type(def->type)) continue;
         const Slic3r::ConfigOption* a = state.project_config.option(key);
         const Slic3r::ConfigOption* b = reloaded.project_config.option(key);
-        if (!a || !b) {
-            // Key absent on one side — only flag if both should have it.
-            // Since we're iterating state's keys, 'a' is always present.
-            // 'b' absent after reload means the writer dropped it — that's
-            // likely a serialization issue, but we only compare when both exist.
-            continue;
+        if (!a) continue;   // defensive; iterating state's keys, 'a' should exist
+        if (!b) {
+            // Key absent after reload: the writer dropped it. Detecting
+            // exactly this is half of what a roundtrip check is for —
+            // value drift is the other half (below).
+            gr.failed_check = "config_roundtrip";
+            gr.failure_detail = "key '" + key +
+                                "' dropped by writer (present before save, "
+                                "absent after reload)";
+            return false;
         }
         if (a->serialize() != b->serialize()) {
             gr.failed_check = "config_roundtrip";

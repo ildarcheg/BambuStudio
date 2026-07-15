@@ -22,8 +22,13 @@ struct ProjectState {
 
     ProjectState(const ProjectState&) = delete;
     ProjectState& operator=(const ProjectState&) = delete;
+    // Move-construction is safe (vector move leaves the source empty, so
+    // the source dtor deletes nothing). Move-ASSIGN is deleted: the
+    // defaulted one would replace the target's plate_data pointers without
+    // deleting them — a silent leak. Nothing move-assigns a ProjectState;
+    // keep it that way.
     ProjectState(ProjectState&&) = default;
-    ProjectState& operator=(ProjectState&&) = default;
+    ProjectState& operator=(ProjectState&&) = delete;
 };
 
 } // namespace bambu_cli

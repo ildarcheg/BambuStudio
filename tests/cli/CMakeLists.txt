@@ -26,6 +26,7 @@ set(BAMBU_CLI_TEST_SOURCES
     e2e/test_project_profile.cpp
     e2e/test_project_aux.cpp
     e2e/test_thumbnail_passthrough.cpp
+    e2e/test_object_list.cpp
     e2e/test_project_apply.cpp
     # Unit tests: link project_ops directly; no subprocess.
     unit/unit_helpers.cpp
@@ -46,6 +47,7 @@ set(BAMBU_CLI_TEST_SOURCES
     unit/test_cover_real_images.cpp
     unit/test_invariant_aux_passthrough.cpp
     unit/test_invariant_cover_references.cpp
+    unit/test_invariant_config_roundtrip.cpp
     unit/test_index_conventions.cpp
     unit/test_no_gui_includes.cpp
     unit/test_exception_dispatch.cpp

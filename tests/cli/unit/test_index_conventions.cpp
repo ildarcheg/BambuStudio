@@ -14,6 +14,7 @@
 #include "io.hpp"
 
 #include <boost/filesystem.hpp>
+#include <type_traits>
 
 namespace fs = boost::filesystem;
 using bambu_cli::ProjectState;
@@ -95,3 +96,13 @@ TEST_CASE("obj_inst_map: canonical single-domain shape — key == loaded_id "
     // 1 loaded + 2 added instances must all be represented.
     REQUIRE(entries >= 3);
 }
+
+// ProjectState owns raw PlateData* (custom dtor deletes them). A defaulted
+// move-assign would leak the target's plates: vector move-assign frees
+// nothing. Nothing in the codebase move-assigns a ProjectState, so the
+// operation is deleted outright — this pin turns any future reintroduction
+// into a compile error instead of a silent leak.
+static_assert(!std::is_move_assignable<bambu_cli::ProjectState>::value,
+              "ProjectState move-assign must stay deleted (raw-owning plate_data)");
+static_assert(!std::is_copy_assignable<bambu_cli::ProjectState>::value,
+              "ProjectState copy-assign must stay deleted");
