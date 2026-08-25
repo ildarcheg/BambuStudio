@@ -16,6 +16,12 @@ if (MSVC)
             COMMAND ${CMAKE_COMMAND} -E copy_directory  "${_source_dir}/bin" "${_dstdir}/bin"
             COMMAND ${CMAKE_COMMAND} -E copy_directory  "${_source_dir}/lib" "${_dstdir}/lib"
             COMMAND ${CMAKE_COMMAND} -E copy_directory  "${_source_dir}/include" "${_dstdir}/include"
+            # The prebuilt archive's *.pc files carry a relative `prefix=./dist`,
+            # which CMake rejects once libslic3r_gui is consumed from another
+            # directory. See fix_pc_prefix.cmake for the full error and why only
+            # -DSLIC3R_BUILD_TESTS=ON exposes it.
+            COMMAND ${CMAKE_COMMAND} -DPCDIR=${_dstdir}/lib/pkgconfig -DPREFIX=${_dstdir}
+                    -P ${CMAKE_CURRENT_LIST_DIR}/fix_pc_prefix.cmake
     )
 
 else ()
