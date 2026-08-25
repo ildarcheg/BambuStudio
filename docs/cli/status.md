@@ -896,3 +896,59 @@ about them is a *feature*, not part of this port.
 Base tag: `v02.08.02.61` (`926a71925`). Rollback tag:
 `archive/v2.07.01-cli` (`570ffbe03`). Port branch (this entry):
 `port-cli-v2.08.02`.
+
+### Addendum (2026-08-24, same day) — install target + promotion
+
+Two follow-ups landed after the port entry above was first written, so
+its "not yet promoted" wording no longer holds.
+
+**`66dfe6b21` — install target.** The `# --- Install (out of scope for
+v1) ---` placeholder at the end of `src/cli/CMakeLists.txt` is gone.
+
+    cmake --install <build> --config Release --component bambu-cli --prefix <dir>
+
+stages **12 files / 16.3 MB**: `bambu-cli.exe` plus `TKBRep`, `TKCDF`,
+`TKernel`, `TKG2d`, `TKG3d`, `TKGeomBase`, `TKLCAF`, `TKMath`,
+`msvcp140`, `vcruntime140`, `vcruntime140_1`. The set is computed by
+`file(GET_RUNTIME_DEPENDENCIES)` walking the real PE import graph at
+install time, not hardcoded, so an OCCT bump cannot silently produce a
+broken payload. Cross-checked against an independent `dumpbin`
+dependency walk — same 11 DLLs.
+
+Scale of what this replaces: the `POST_BUILD` step mirrors the entire
+deps `bin/` directory next to the exe, so the raw build output is
+~259 MB (56 DLLs plus `openssl.exe`, `ffmpeg.exe`, `tiff*.exe`,
+`vdb_print.exe`). Only 16.3 MB of it is reachable from `bambu-cli.exe`.
+
+Two non-obvious constraints, both learned by hitting them:
+
+- The rules live in a **COMPONENT**. A bare `cmake --install` runs every
+  rule in the project, including the GUI's
+  `install(DIRECTORY resources ...)`, whose DESTINATION is baked at
+  configure time and ignores `--prefix`; it fails trying to write
+  `C:/Program Files/BambuStudio/resources`.
+- `cmake_policy(SET CMP0087 NEW)` is mandatory. The file declares 3.13
+  compatibility, so without it `$<TARGET_FILE:bambu-cli>` inside
+  `install(CODE)` arrives as an unexpanded literal.
+
+`InstallRequiredSystemLibraries` is deliberately unused: the MSVC
+runtime DLLs live in the deps `bin/` dir and are resolved by the same
+walk, so the staged directory runs without the VC++ redistributable.
+
+Verified: staged copy runs from an unrelated cwd under a stock PATH
+(`--version`, `project init`, `--json inspect`, `plate list`, all exit
+0); `cli_tests` still 471 / 4406 green after the change.
+
+**Promotion.** `master` was moved from `570ffbe03` to `66dfe6b21`, so it
+now tracks `v02.08.02.61` per the standing policy. Not a fast-forward —
+the port begins at the upstream tag, so the histories are separate; the
+old tip is preserved by `archive/v2.07.01-cli`.
+
+**Deployment.** `C:\Users\ildar\Documents\bambu-cli-bin\` (expected by a
+separate local app) did not survive the Windows reinstall and was
+recreated by pointing `--prefix` at it. Verified in place. There is no
+automatic sync — re-run the install after any rebuild the consumer
+should pick up.
+
+**Still not pushed.** `origin/master` remains at `570ffbe03`. Publishing
+requires a force-push and has not been authorised.

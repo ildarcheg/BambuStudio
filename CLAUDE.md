@@ -69,11 +69,12 @@ split-to-parts / merge-parts mesh-state errors throw a typed
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
 ## Branch state (as of 2026-08-24)
-- `master` is still the **`v02.07.01.62`** GA port (tip `570ffbe03`).
-  The live work is on **`port-cli-v2.08.02`** = upstream tag
-  `v02.08.02.61` (`926a71925`) + four port commits. Promotion of
-  `master` to this branch has NOT happened yet and nothing has been
-  pushed — `origin/master` still points at the 2.07 port.
+- `master` **is** the `v02.08.02.61` port (tip `66dfe6b21`), promoted
+  2026-08-24 from `port-cli-v2.08.02` (both labels point at the same
+  commit). **`origin/master` is still at `570ffbe03` — NOTHING has been
+  pushed.** Publishing needs a force-push, because the port starts from
+  the upstream tag rather than from the old `master`, so the two are
+  separate histories, not a fast-forward.
 - **Why the retarget:** the 2.08 line went GA (`v02.08.02.60`
   2026-08-14, `v02.08.02.61` 2026-08-21, both prerelease=false). The
   2026-07-14 retarget away from 2.08 happened *only* because
@@ -193,10 +194,27 @@ The 2026-07-14 push (tag `archive/v2.7-cli` first, then
   them is a FEATURE, not port scope.
 - `bambu-cli --verbose` is parsed but a no-op (intentional deferral —
   see Phase F.1 entry in `status.md`).
-- No `install(TARGETS bambu-cli)` — ships from the build dir only
-  (`src/cli/CMakeLists.txt:100`; currently
-  `build_v20802\src\cli\Release`. The `build_v20701` and `build_v208`
-  dirs named in older notes do not exist on this machine).
+- ~~No `install(TARGETS bambu-cli)`~~ — resolved 2026-08-24. The CLI now
+  has install rules in the **`bambu-cli` component**
+  (`src/cli/CMakeLists.txt`):
+  `cmake --install <build> --config Release --component bambu-cli --prefix <dir>`
+  stages 12 files / 16.3 MB — the exe plus the eight OCCT and three MSVC
+  runtime DLLs it actually loads, resolved by
+  `file(GET_RUNTIME_DEPENDENCIES)` at install time (not hardcoded).
+  Two traps worth remembering: a **bare `cmake --install` fails** — it
+  runs every rule in the project, including the GUI's
+  `install(DIRECTORY resources ...)` whose DESTINATION is baked at
+  configure time and ignores `--prefix`; and `cmake_policy(SET CMP0087
+  NEW)` is required or the `$<TARGET_FILE:...>` genex inside
+  `install(CODE)` arrives unexpanded. Do NOT ship the raw build output
+  (`build_v20802\src\cli\Release`) — its `POST_BUILD` step mirrors the
+  whole deps `bin/` dir, ~259 MB of which only 16.3 MB is reachable.
+- **Downstream consumer:** another local app expects the CLI at
+  `C:\Users\ildar\Documents\bambu-cli-bin\bambu-cli.exe`. That directory
+  is a plain `--prefix` target of the command above and was (re)created
+  on 2026-08-24 — it did not survive the Windows reinstall. Re-run the
+  install after any rebuild that the consumer should pick up; there is
+  no automatic sync.
 - ~~Thumbnail passthrough compaction caveat~~ — resolved 2026-07-15:
   `rewrite_thumbnails` was eliminated entirely; thumbnails now travel as
   decoded RGBA through `store_bbs_3mf`'s own thumbnail path (see
