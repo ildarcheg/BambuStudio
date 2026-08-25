@@ -103,4 +103,62 @@ if(WIN32)
     endif()
 endif()
 
-# --- Install (out of scope for v1; bambu-cli ships from build/) ---
+# --- Install -------------------------------------------------------------
+# `cmake --install <build> --config Release --prefix <dir>` stages a
+# self-contained bambu-cli: the executable plus exactly the shared libraries
+# it actually loads.
+#
+# Why this is not just "copy the POST_BUILD output above": that step mirrors
+# the entire deps bin/ directory next to the exe, because a copy_directory
+# cannot know which files matter. That lands ~56 DLLs and a pile of unrelated
+# dep tools (openssl.exe, ffmpeg.exe, tiff*.exe, vdb_print.exe) in the build
+# output. The real runtime closure is an order of magnitude smaller.
+#
+# file(GET_RUNTIME_DEPENDENCIES) walks the actual PE import graph at install
+# time rather than hardcoding a list, so this stays correct if the dependency
+# set shifts (an OCCT bump, say) without anyone having to re-derive it.
+# Everything here is in the `bambu-cli` COMPONENT on purpose. A bare
+# `cmake --install` runs every rule in the project, including the GUI's
+# resources copy, whose DESTINATION is baked at configure time and ignores
+# --prefix. Scoping to a component keeps the CLI independently installable:
+#
+#   cmake --install <build> --config Release --component bambu-cli --prefix <dir>
+#
+# CMP0087 is required for the $<TARGET_FILE:...> generator expression below to
+# be evaluated inside install(CODE); this file declares 3.13 compatibility, so
+# the policy would otherwise default to OLD and the genex would arrive as a
+# literal string.
+cmake_policy(SET CMP0087 NEW)
+
+install(TARGETS bambu-cli RUNTIME DESTINATION . COMPONENT bambu-cli)
+
+if(WIN32)
+    # The MSVC runtime (msvcp140, vcruntime140*) lives in the deps bin/ dir and
+    # gets resolved by the dependency walk below like any other import, so the
+    # staged directory also runs on a machine with no VC++ redistributable.
+    # That makes InstallRequiredSystemLibraries unnecessary here.
+    install(CODE "set(_bambu_cli_exe  [[$<TARGET_FILE:bambu-cli>]])" COMPONENT bambu-cli)
+    install(CODE "set(_bambu_dep_dirs [[${CMAKE_PREFIX_PATH}/bin]] [[${CMAKE_PREFIX_PATH}/bin/occt]])" COMPONENT bambu-cli)
+    install(CODE [[
+        file(GET_RUNTIME_DEPENDENCIES
+            EXECUTABLES                 ${_bambu_cli_exe}
+            RESOLVED_DEPENDENCIES_VAR   _resolved
+            UNRESOLVED_DEPENDENCIES_VAR _unresolved
+            DIRECTORIES                 ${_bambu_dep_dirs}
+            PRE_EXCLUDE_REGEXES         "api-ms-win-.*" "ext-ms-.*"
+            POST_EXCLUDE_REGEXES        ".*[/\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\].*"
+        )
+        foreach(_dll IN LISTS _resolved)
+            file(INSTALL
+                DESTINATION "${CMAKE_INSTALL_PREFIX}"
+                TYPE SHARED_LIBRARY
+                FOLLOW_SYMLINK_CHAIN
+                FILES "${_dll}")
+        endforeach()
+        # Anything left unresolved is expected to be a system DLL supplied by
+        # Windows itself; surface it rather than failing silently.
+        if(_unresolved)
+            message(STATUS "bambu-cli install: unresolved (assumed system): ${_unresolved}")
+        endif()
+    ]] COMPONENT bambu-cli)
+endif()
