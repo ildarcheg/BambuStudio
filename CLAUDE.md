@@ -186,10 +186,13 @@ The 2026-07-14 push (tag `archive/v2.7-cli` first, then
   Bambu Studio. Signed-off milestones: M11 (2026-05-30) and M12
   (2026-06-01) from the pre-port 2.7-era lineage, and **the
   `v02.08.02.61` port itself (2026-08-24)** — `bcli_smoke.3mf` opened
-  and verified in Bambu Studio 02.08.02.61, the same version the CLI is
-  built against. The `v02.07.01.62` GA port never got one and now never
-  will, having been superseded. That 2026-08-24 sign-off covers the
-  Step 15 final-state check only, not the per-step intermediate visuals
+  and SLICED successfully in Bambu Studio 02.08.02.61, the same version
+  the CLI is built against. The successful slice is the load-bearing
+  part: it drives config resolution and geometry through the full BS
+  pipeline, not just the 3MF parser. The `v02.07.01.62` GA port never
+  got one and now never will, having been superseded. That sign-off
+  covers the Step 15 final-state check only, not the per-step
+  intermediate visuals
   (see the status.md entry for exactly what is and is not covered).
 - 2.08 mixed (virtual) filaments — `PlateData::mixed_filaments_info`
   and `ams_list` — are neither read nor written by the CLI. They
