@@ -4,8 +4,11 @@
 A standalone GUI-free CLI (`bambu-cli.exe`) that composes BBS `.3mf`
 projects by driving libslic3r's load/store directly. Lives under
 `src/cli/` + `tests/cli/`. Parallel to the sibling `orca-cli` initiative
-in the OrcaSlicer fork at `C:\Users\ildarcheg\Documents\GitHub\OrcaSlicer`
-(read-only reference; feature-parity is the explicit goal).
+in the OrcaSlicer fork formerly checked out at
+`C:\Users\ildarcheg\Documents\GitHub\OrcaSlicer` (read-only reference;
+feature-parity is the explicit goal). **That checkout no longer exists
+on this machine** — re-clone it before relying on any sibling
+comparison below.
 
 ## Architecture in one paragraph
 `bambu_cli_core` static lib holds all logic; both the `bambu-cli` exe and
@@ -13,7 +16,7 @@ the `cli_tests` Catch2 binary link it (no drift). All mutations go
 through libslic3r's own `load_bbs_3mf` / `store_bbs_3mf` / `Model` /
 `DynamicPrintConfig` / `PlateData` / `print_config_def` — no upstream
 monkey-patching, no `#ifdef`s, only an `add_subdirectory(cli)` hook in
-`src/CMakeLists.txt:28` and `tests/CMakeLists.txt:38`. Save path is a
+`src/CMakeLists.txt:28` and `tests/CMakeLists.txt:39`. Save path is a
 `.bak`-swap atomic pattern (ported from OrcaSlicer M11) in
 `src/cli/io.cpp:284-310` with a three-check post-write invariant guard
 (rels target resolution / per-plate thumbnails / vector-config
@@ -65,80 +68,94 @@ split-to-parts / merge-parts mesh-state errors throw a typed
 `.bak`-swap atomic save originated in OrcaSlicer M11 — Bambu ported it
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
-## Branch state (as of 2026-07-14)
-- `master` = tip of `port-cli-v2.07.01` = upstream tag `v02.07.01.62`
-  (`42d319c66`) + the port commits (tree port `264000a80`, hooks
-  `6b76fb2c1`, CMake portability fixes `6243afa37`) plus this docs
-  commit — `git log v02.07.01.62..master` is authoritative (do not
-  hardcode a HEAD SHA here; it will drift). **Zero changes were needed
-  to `src/cli` or `tests/cli` source themselves** — `load_bbs_3mf` /
-  `StoreParams` / `Arrange` / `Orient` APIs are unchanged between the
-  old base and `v02.07.01.62`, and the stubs in
-  `stubs_for_libslic3r.cpp` remain both necessary and sufficient.
-- **Retarget story:** the port was first done against `v02.08.00.50`
-  (2026-07-14, same day) and then re-targeted, because GitHub marks
-  `v02.08.00.50` and `v02.08.01.55` as prerelease — **`v02.07.01.62`
-  is the latest public GA release** (prerelease=false, published
-  2026-06-16). Policy: `master` tracks the latest GA release, not the
-  latest tag. The completed 2.08 port is parked, not discarded — see
+## Branch state (as of 2026-08-24)
+- `master` is still the **`v02.07.01.62`** GA port (tip `570ffbe03`).
+  The live work is on **`port-cli-v2.08.02`** = upstream tag
+  `v02.08.02.61` (`926a71925`) + four port commits. Promotion of
+  `master` to this branch has NOT happened yet and nothing has been
+  pushed — `origin/master` still points at the 2.07 port.
+- **Why the retarget:** the 2.08 line went GA (`v02.08.02.60`
+  2026-08-14, `v02.08.02.61` 2026-08-21, both prerelease=false). The
+  2026-07-14 retarget away from 2.08 happened *only* because
+  `v02.08.00.50` / `v02.08.01.55` were prerelease. Policy is unchanged:
+  `master` tracks the latest GA release, not the latest tag.
+- **Zero changes were needed to `src/cli` or `tests/cli` source**, same
+  as the 2.07 port. `load_bbs_3mf` / `store_bbs_3mf` / `StoreParams`
+  signatures are unchanged and `Arrange.hpp` / `Orient.hpp` are
+  byte-identical between `v02.07.01.62` and `v02.08.02.61`. `PlateData`
+  gained fields (mixed filaments, AMS load/unload times,
+  `pause_printing`) but only additively.
+- **The carried non-CLI delta shrank.** Upstream has absorbed most of
+  it: the `Freetype::Freetype` fix, and all six macOS/Clang-21 hunks
+  (`check_cxx_compiler_flag` probe, `ASSIMP_BUILD_ZLIB`, the wxWidgets
+  policy floor, `MediaPlayCtrl.h` / `wxMediaCtrl2.h`) now ship upstream,
+  in several cases as strictly better versions. Do NOT re-apply them.
+  What remains: 2 hooks, 10 `cmake_minimum_required` bumps to 3.5 (only
+  where upstream is still *below* 3.5 — `src/admesh`, `src/boost` and
+  `FindOpenVDB.cmake` are at 3.13 and must NOT be downgraded), the
+  `deps/CMakeLists.txt` policy line, `.gitignore`, and the ffmpeg fix
   below.
-- `port-cli-v2.08` branch (tip `2e8ac75e6`) retains the full 2.08-based
-  port (built and test-verified before the retarget) for when the
-  2.08 line goes GA. Its own build dir (`build_v208`) and deps
-  (`BambuStudio_dep_v208`) are untouched by this retarget.
-- `archive/v2.7-cli` tag (`6cb539d2f`) preserves the entire pre-port
-  2.7-era lineage, including all M0–M12 + Phase A–G + convergence
-  history and the port spec/plan docs. It is `201` commits past
-  `v02.07.00.55` (`git rev-list --count v02.07.00.55..archive/v2.7-cli`).
-  Two upstream features present in that lineage do not exist on either
-  the 2.07 or 2.08 lines and were not reintroduced by any port: the
-  `alternate_extra_wall` print feature and the camera-fullscreen GUI
-  feature.
-- Pushed to `origin` on 2026-07-14: `origin/master` = the GA port tip,
-  `origin/port-cli-v2.08` = the parked 2.08 port, and the
-  `archive/v2.7-cli` tag (pushed first, so the pre-port history stays
-  reachable on the remote).
-- Last `cli_tests` run: **447 cases / 4271 assertions, all green** on
-  the `v02.07.01.62`-ported tree (3 runs, incl. one randomized test
-  order) — identical counts to the pre-port 2.7-era baseline (post-M12)
-  and to the parked 2.08 port. E2E smoke: `project init` from
-  `tests/cli/fixtures/test_reference.3mf` then `inspect` → plates:1
-  objects:1 filaments:4; re-init from the CLI's own output produced
-  identical counts; all exit 0.
-- Build environment for the GA-based tree (Windows):
-  - Deps dir: the **existing** `C:\Users\ildarcheg\Documents\GitHub\BambuStudio_dep`
-    (2.7-era deps) — works unchanged, no rebuild needed for
-    `v02.07.01.62`.
-  - Build dir: `build_v20701`, configured with
-    `cmake -S . -B build_v20701
-    -DCMAKE_PREFIX_PATH=".../BambuStudio_dep/usr/local"
-    -DSLIC3R_BUILD_TESTS=ON
-    -DPKG_CONFIG_EXECUTABLE=C:/Strawberry/perl/bin/pkg-config.bat`.
-    `v02.07.01.62` has `find_package(PkgConfig REQUIRED)`, so the `-D`
-    is mandatory (without it, CMake picks Strawberry's extensionless
-    `perl` script and configure fails).
-  - `build_win.bat` on this tag auto-selects the newest installed VS
-    (VS 2026 on this box) — any *deps* rebuild would need `-v 16`, but
-    none was needed this time since the 2.7-era deps are reused as-is.
-  - `cli_tests.exe` has no `POST_BUILD` DLL-copy step — run it with
-    `build_v20701\src\cli\Release` and its `occt` DLL dir prepended to
-    `PATH`.
-  - Machine note: Windows Smart App Control blocked freshly built
-    exes (CodeIntegrity `0xC0E90002`) until the user disabled it on
-    2026-07-14.
-  - GUI manual sign-off in Bambu Studio (`v02.07.01.62`, GA) is still
-    pending (user-driven gate, not yet performed) — see
-    `docs/cli/status.md`.
-- Working tree is clean as of this CLAUDE.md write.
+- **`archive/v2.07.01-cli`** (`570ffbe03`) is the rollback tag for the
+  pre-retarget `master`. `archive/v2.7-cli` (`6cb539d2f`) still
+  preserves the entire pre-port 2.7-era lineage. `port-cli-v2.08` (tip
+  `2e8ac75e6`) remains parked but is now **superseded and stale** — it
+  is based on the 2.08.00.50 beta and its `src/cli` predates
+  `161ed17f8`..`570ffbe03`. Retire it (tag + delete) only after this
+  port is promoted.
+- Last `cli_tests` run: **471 cases / 4406 assertions, all green** on
+  the `v02.08.02.61`-ported tree (2 runs, one `--order rand`). The
+  **447 / 4271** figure quoted in older notes is *stale*, not a
+  regression — it was recorded at `486a702ad`, before the twelve
+  quality commits; the `TEST_CASE` count in `tests/cli` went 448 → 472
+  over that range. E2E smoke: `project init --template
+  tests/cli/fixtures/test_reference.3mf`, then `inspect` → plates:1
+  objects:1 filaments:4; re-init from the CLI's own output → identical
+  counts; all exit 0.
 
-## Push record (executed 2026-07-14, user-approved)
-Published in the required order: (1) `git push origin
-archive/v2.7-cli` (tag first — preserves the entire 2.7-era lineage on
-the remote), (2) `git push --force-with-lease origin master`
-(rewrote `origin/master` from the old pre-port history to the
-`v02.07.01.62`-based port), (3) `git push origin port-cli-v2.08`
-(parks the 2.08 beta port remotely). Verified via `git ls-remote`.
+## Build environment (Windows was REINSTALLED — 2026-08-24)
+Every `C:\Users\ildarcheg\Documents\GitHub\...` path in older notes is
+**gone**; that profile does not exist on this machine. Current setup:
+- Deps: `C:\Users\ildar\Documents\BambuStudio_dep_v20802`, built fresh
+  at the 2.08 revision (973 MB, Boost 1.84). Configure from
+  `deps/build` with `-G "Visual Studio 17 2022" -A x64
+  -DDESTDIR=<deps> -DCMAKE_BUILD_TYPE=Release -DDEP_DEBUG=OFF`.
+- Build dir: `build_v20802`, configured with
+  `-DCMAKE_PREFIX_PATH=<deps>/usr/local -DSLIC3R_BUILD_TESTS=ON
+  -DPKG_CONFIG_EXECUTABLE=C:/Strawberry/perl/bin/pkg-config.bat`. That
+  last `-D` is mandatory: Strawberry ships BOTH `pkg-config` and
+  `pkg-config.bat`, and CMake picks the extensionless Perl script
+  otherwise.
+- Toolchain: VS 2022 Community 17.14.39, MSVC 14.44.35207
+  (`MSVC_VERSION` 1944 → `DEP_VS_VER 17` / `msvc-14.3`), Windows SDK
+  10.0.26100.0, Strawberry Perl 5.42.
+- **Use the VS-bundled CMake 3.31.6**
+  (`<VS>\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`), NOT
+  `Kitware.CMake` — winget only offers 4.4.2, and CMake 4.x hard-errors
+  on `cmake_minimum_required` below 3.5, which ten sub-projects still
+  declare at this tag.
+- Build only `cli_tests` / `bambu-cli` with `--parallel 2` (higher
+  parallelism OOMs MSVC's PCH). Never build the `BambuStudio` GUI
+  target (known LNK2038, out of scope).
+- `cli_tests.exe` has no `POST_BUILD` DLL-copy step — run it with
+  `build_v20802\src\cli\Release` and `<deps>\usr\local\bin\occt`
+  prepended to `PATH`.
+- **ffmpeg pkg-config fix (`deps/FFMPEG/fix_pc_prefix.cmake`):** on
+  MSVC the ffmpeg dep is a prebuilt archive copied verbatim, and its
+  `*.pc` files carry a relative `prefix=./dist`.
+  `pkg_check_modules(LIBAV ...)` (`src/slic3r/CMakeLists.txt:807`) feeds
+  that into `libslic3r_gui`, and CMake rejects a relative entry in
+  `INTERFACE_INCLUDE_DIRECTORIES` as soon as another directory consumes
+  the target — which only `-DSLIC3R_BUILD_TESTS=ON` causes
+  (`tests/slic3rutils`). Upstream CI builds with tests off and never
+  sees it. NOT a port regression: the same recipe and consumer exist at
+  `v02.07.01.62`.
 
+## Push record
+The 2026-07-14 push (tag `archive/v2.7-cli` first, then
+`--force-with-lease` `master`, then `port-cli-v2.08`) still stands —
+`origin/master` is the `v02.07.01.62` port. **The 2026-08-24
+`v02.08.02.61` port has NOT been pushed**; it exists only locally on
+`port-cli-v2.08.02`.
 ## File layout
 - `src/cli/` — entry (`main.cpp`), `io.{hpp,cpp}`,
   `project_ops.{hpp,cpp}`, `project_tab_ops.{hpp,cpp}`,
@@ -167,17 +184,19 @@ the remote), (2) `git push --force-with-lease origin master`
   and Phases B/C/D — none of those 3MFs have been signed off in
   Bambu Studio. M11 (2026-05-30) and M12 (2026-06-01) are the two
   signed-off milestones from the pre-port (2.7-era) lineage; the
-  `v02.07.01.62` GA port itself has NOT had a GUI manual sign-off yet
-  (open item as of 2026-07-14 — see "Branch state" above). The parked
-  2.08 port also has no GUI sign-off, but that is out of scope until
-  the 2.08 line goes GA.
+  `v02.07.01.62` GA port never got one either, and neither has the
+  `v02.08.02.61` port (open item as of 2026-08-24 — see "Branch state"
+  above). This is the one gate the automated suite cannot close.
+- 2.08 mixed (virtual) filaments — `PlateData::mixed_filaments_info`
+  and `ams_list` — are neither read nor written by the CLI. They
+  survive a load/store round-trip untouched. Teaching the CLI about
+  them is a FEATURE, not port scope.
 - `bambu-cli --verbose` is parsed but a no-op (intentional deferral —
   see Phase F.1 entry in `status.md`).
 - No `install(TARGETS bambu-cli)` — ships from the build dir only
-  (`src/cli/CMakeLists.txt:100`; currently `build_v20701\src\cli\Release`
-  for the GA-based tree, `build_v208\src\cli\Release` for the parked
-  2.08 port, historically `build\src\cli\Release` for the pre-port
-  lineage).
+  (`src/cli/CMakeLists.txt:100`; currently
+  `build_v20802\src\cli\Release`. The `build_v20701` and `build_v208`
+  dirs named in older notes do not exist on this machine).
 - ~~Thumbnail passthrough compaction caveat~~ — resolved 2026-07-15:
   `rewrite_thumbnails` was eliminated entirely; thumbnails now travel as
   decoded RGBA through `store_bbs_3mf`'s own thumbnail path (see

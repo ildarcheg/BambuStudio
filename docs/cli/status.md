@@ -750,3 +750,149 @@ Base tag: `v02.07.01.62` (`42d319c66`). Archive tag: `archive/v2.7-cli`
 (`6cb539d2f`, 201 commits past `v02.07.00.55`). Parked prerelease
 port: `port-cli-v2.08` (tip `2e8ac75e6`, base tag `v02.08.00.50` /
 `a78684a11`). Port branch (this entry): `port-cli-v2.07.01`.
+
+## 2026-08-24 — Port to upstream v02.08.02.61 (latest GA)
+
+**Status: green.** The bambu-cli project (M0–M12 + convergence + the
+twelve post-2.07-port quality commits) now sits on upstream tag
+`v02.08.02.61` (`926a71925`), published 2026-08-21 and marked
+prerelease=false.
+
+### Why now
+
+The 2026-07-14 retarget from 2.08 to `v02.07.01.62` happened for one
+reason only: GitHub marked `v02.08.00.50` and `v02.08.01.55` as
+prerelease. The 2.08 line has since gone GA — `v02.08.02.60` on
+2026-08-14, then `v02.08.02.61` on 2026-08-21 — so the standing
+policy ("`master` tracks the latest GA release, not the latest tag")
+makes this a retarget trigger.
+
+The CLI tree was taken from `master`, **not** from the parked
+`port-cli-v2.08` branch: that branch is based on the 2.08.00.50
+*beta* and its `src/cli` predates `161ed17f8`..`570ffbe03`.
+
+### API-surface audit (v02.07.01.62 → v02.08.02.61)
+
+Every libslic3r header `src/cli` includes was diffed:
+
+- `load_bbs_3mf` / `store_bbs_3mf` / `StoreParams` — signatures
+  **unchanged**.
+- `Arrange.hpp`, `Orient.hpp` — **byte-identical**. `Config.hpp`
+  unchanged.
+- `bbs_3mf.hpp` — additive only. `PlateData` gains
+  `mixed_filaments_info`, `default_ams_type`, `ams_list`,
+  `pause_printing`, `support_material_on_wipe_tower`; two new
+  structs (`AmsLoadUnloadTimeInfo`, `PlateMixedFilamentInfo`).
+- `Model.hpp`, `PrintConfig.hpp`, `Preset.hpp` — removals confined
+  to private `serialize()` bodies, `emboss_shape`,
+  `nvtMaxNozzleVolumeType` and `s_last_timestamp`; none on the CLI's
+  call surface.
+- Link targets `libslic3r`, `cereal`, `boost_headeronly`,
+  `OpenSSL::Crypto` all still defined.
+
+**Zero changes were needed to `src/cli` or `tests/cli` source.**
+`git diff master:src/cli HEAD:src/cli` is empty, likewise
+`tests/cli` and `docs/cli`.
+
+### Carried non-CLI delta — narrowed
+
+Upstream has since absorbed most of what `master` carried:
+
+- **10** `cmake_minimum_required` bumps to 3.5 (was 13). Only
+  sub-projects declaring *below* 3.5 are raised. `src/admesh`,
+  `src/boost` and `cmake/modules/FindOpenVDB.cmake` now declare 3.13
+  upstream — applying master's literal 3.5 would **downgrade** them.
+- `src/libslic3r/CMakeLists.txt` `Freetype::Freetype` — **dropped**,
+  shipped upstream.
+- All 6 macOS/Clang-21 hunks — **dropped as obsolete**. Upstream fixed
+  each independently, in several cases better: the same
+  `check_cxx_compiler_flag` probe without master's
+  `VERSION_GREATER 15` gate; `ASSIMP_BUILD_ZLIB` made
+  APPLE-conditional rather than unconditionally OFF; the wxWidgets
+  policy floor; and `static inline wxMediaState` with an Xcode-26
+  rationale comment in `MediaPlayCtrl.h` / `wxMediaCtrl2.h`, a
+  superset of master's `int` workaround. Re-applying master's would
+  have regressed them.
+- `deps/CMakeLists.txt` keeps the `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`
+  line: Windows gets it via `DEP_CMAKE_OPTS`
+  (`deps-windows.cmake:60`), but macOS/Linux set that variable to
+  something else, so they would have no floor.
+
+### One real fix required
+
+`-DSLIC3R_BUILD_TESTS=ON` failed at the CMake generate step:
+
+    CMake Error in tests/slic3rutils/CMakeLists.txt:
+      Target "libslic3r_gui" contains relative path in its
+      INTERFACE_INCLUDE_DIRECTORIES: "./dist/include"
+
+On MSVC `deps/FFMPEG/FFMPEG.cmake` copies a prebuilt archive verbatim,
+and its `*.pc` files carry `prefix=./dist`.
+`pkg_check_modules(LIBAV ...)` (`src/slic3r/CMakeLists.txt:807`) feeds
+that relative path into `libslic3r_gui`, which CMake rejects once
+another directory consumes the target. **Not a port regression** — the
+same recipe and consumer exist at `v02.07.01.62`; upstream CI never
+sees it because it builds with tests off. Fixed reproducibly via
+`deps/FFMPEG/fix_pc_prefix.cmake` as a post-copy step.
+
+### Build environment (this machine — Windows was reinstalled)
+
+The `C:\Users\ildarcheg\...` paths from earlier entries **no longer
+exist**. Current setup:
+
+- Deps: `C:\Users\ildar\Documents\BambuStudio_dep_v20802`, built
+  fresh at the 2.08 revision (973 MB, Boost 1.84).
+  `cmake .. -G "Visual Studio 17 2022" -A x64 -DDESTDIR=<deps> -DDEP_DEBUG=OFF`
+- Build dir: `build_v20802`, configured with
+  `-DCMAKE_PREFIX_PATH=<deps>/usr/local -DSLIC3R_BUILD_TESTS=ON`
+  `-DPKG_CONFIG_EXECUTABLE=C:/Strawberry/perl/bin/pkg-config.bat`
+  (mandatory — Strawberry ships both `pkg-config` and
+  `pkg-config.bat`, and CMake picks the extensionless Perl script
+  otherwise).
+- Toolchain: VS 2022 Community 17.14.39, MSVC 14.44.35207
+  (`MSVC_VERSION` 1944 → `DEP_VS_VER 17` / `msvc-14.3`), Windows
+  SDK 10.0.26100.0, Strawberry Perl 5.42.
+- **CMake 3.31.6, VS-bundled** — deliberately not `Kitware.CMake`
+  4.4.2, the only version winget offers. CMake 4.x hard-errors on
+  `cmake_minimum_required` below 3.5, which ten sub-projects still
+  declare at this tag.
+- Build only `cli_tests` / `bambu-cli`, `--parallel 2`. Never the
+  `BambuStudio` GUI target (known LNK2038, out of scope).
+
+### Test counts
+
+- `cli_tests`: **471 cases / 4406 assertions, all green** — 2 runs,
+  one with `--order rand`. Identical counts both runs.
+- The **447 / 4271** figure quoted in earlier entries is *stale*, not a
+  regression: it was recorded at `486a702ad`, before the twelve
+  quality commits that followed. `TEST_CASE` macro count in
+  `tests/cli` went 448 → 472 over that range, matching the +24 case
+  delta exactly.
+- E2E smoke: `project init --template tests/cli/fixtures/test_reference.3mf`,
+  then `inspect` → plates:1 objects:1 filaments:4; re-init from the
+  CLI's own output → identical counts; `--json` Shape A well-formed;
+  all invocations exit 0.
+
+### Smoke-gate (Layer 2 / Bambu Studio)
+
+`[ ]` — pending. No `v02.08.02.61`-produced 3MF has been opened in
+Bambu Studio for manual sign-off. Carries over as an open item.
+
+### Follow-up, explicitly out of scope
+
+2.08's mixed (virtual) filaments — `PlateData::mixed_filaments_info`
+and `ams_list` — are neither read nor written by the CLI. Teaching it
+about them is a *feature*, not part of this port.
+
+### Commits
+
+- `d20120c3a` — port(cli): bambu-cli tree from master onto `v02.08.02.61`
+- `427b51399` — port(cli): re-apply `add_subdirectory(cli)` hooks
+- `02bf7265c` — build: re-apply the carried CMake portability delta
+  (narrowed for 2.08.02.61)
+- `9458735f7` — build(deps): rewrite the ffmpeg prebuilt's relative
+  pkg-config prefix
+
+Base tag: `v02.08.02.61` (`926a71925`). Rollback tag:
+`archive/v2.07.01-cli` (`570ffbe03`). Port branch (this entry):
+`port-cli-v2.08.02`.
