@@ -69,12 +69,14 @@ split-to-parts / merge-parts mesh-state errors throw a typed
 FROM Orca. The comment in `src/cli/io.cpp:284-310` is correct.
 
 ## Branch state (as of 2026-08-24)
-- `master` **is** the `v02.08.02.61` port (tip `66dfe6b21`), promoted
-  2026-08-24 from `port-cli-v2.08.02` (both labels point at the same
-  commit). **`origin/master` is still at `570ffbe03` — NOTHING has been
-  pushed.** Publishing needs a force-push, because the port starts from
-  the upstream tag rather than from the old `master`, so the two are
-  separate histories, not a fast-forward.
+- `master` **is** the `v02.08.02.61` port, promoted 2026-08-24 from
+  `port-cli-v2.08.02` (both labels point at the same commit).
+  `git log v02.08.02.61..master` is authoritative for the commit list —
+  do NOT hardcode a HEAD SHA here, it drifts.
+- **Pushed 2026-08-24**, verified via `git ls-remote`. It was a forced
+  update (`570ffbe03...`), not a fast-forward: the port starts from the
+  upstream tag rather than from the old `master`, so the two are
+  separate histories. See "Push record" below.
 - **Why the retarget:** the 2.08 line went GA (`v02.08.02.60`
   2026-08-14, `v02.08.02.61` 2026-08-21, both prerelease=false). The
   2026-07-14 retarget away from 2.08 happened *only* because
@@ -152,11 +154,28 @@ Every `C:\Users\ildarcheg\Documents\GitHub\...` path in older notes is
   `v02.07.01.62`.
 
 ## Push record
-The 2026-07-14 push (tag `archive/v2.7-cli` first, then
-`--force-with-lease` `master`, then `port-cli-v2.08`) still stands —
-`origin/master` is the `v02.07.01.62` port. **The 2026-08-24
-`v02.08.02.61` port has NOT been pushed**; it exists only locally on
-`port-cli-v2.08.02`.
+- **2026-08-24 (executed, user-approved).** Published in the required
+  order: (1) `git push origin archive/v2.07.01-cli` — the rollback tag
+  FIRST, because it is the only thing keeping `570ffbe03` (the commit
+  the force-push overwrites) reachable on the remote; (2)
+  `git push --force-with-lease origin master`
+  (`570ffbe03...1f3e42224`, forced update — the port begins at the
+  upstream tag, so it is not a fast-forward); (3)
+  `git push origin port-cli-v2.08.02`. Verified with `git ls-remote`.
+  `origin/master` is now the `v02.08.02.61` port.
+  - Auth note: the Windows reinstall wiped the stored GitHub
+    credentials. Git Credential Manager cannot show its dialog from a
+    non-interactive shell (`fatal: User cancelled dialog`), so the
+    first push of a session must be run from a real terminal; the rest
+    reuse the cached credential.
+- **2026-07-14 (superseded).** Same order, publishing the
+  `v02.07.01.62` port. Its tip is preserved as tag
+  `archive/v2.07.01-cli`.
+- Still on the remote, not cleaned up: `port-cli-v2.07.01`
+  (`486a702ad`) and `port-cli-v2.08` (`2e8ac75e6`, the stale beta).
+  Retiring either means deleting a remote branch — tag first, then
+  delete — and has not been authorised.
+
 ## File layout
 - `src/cli/` — entry (`main.cpp`), `io.{hpp,cpp}`,
   `project_ops.{hpp,cpp}`, `project_tab_ops.{hpp,cpp}`,

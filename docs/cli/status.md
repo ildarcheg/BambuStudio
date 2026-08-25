@@ -972,5 +972,10 @@ recreated by pointing `--prefix` at it. Verified in place. There is no
 automatic sync — re-run the install after any rebuild the consumer
 should pick up.
 
-**Still not pushed.** `origin/master` remains at `570ffbe03`. Publishing
-requires a force-push and has not been authorised.
+**Pushed 2026-08-24.** Order: rollback tag `archive/v2.07.01-cli` first
+(it is the only thing keeping the overwritten `570ffbe03` reachable on
+the remote), then `master` with `--force-with-lease`
+(`570ffbe03...1f3e42224`, forced update), then `port-cli-v2.08.02`.
+Verified with `git ls-remote`. The stale `port-cli-v2.08` beta branch
+and `port-cli-v2.07.01` are still on the remote; retiring them means
+deleting remote branches and was not authorised.
